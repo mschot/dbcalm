@@ -1,0 +1,11 @@
+# Development configuration for DBCalm
+backup_dir: /tmp/dbcalm-backups
+db_type: mariadb
+jwt_secret_key: dev-secret-key-change-in-production
+api_host: 127.0.0.1
+api_port: 8335
+log_level: debug
+jwt_algorithm: HS256
+cors_origins:
+  - http://localhost:5173
+  - http://127.0.0.1:5173

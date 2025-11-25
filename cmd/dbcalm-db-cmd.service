@@ -1,0 +1,24 @@
+[Unit]
+Description=DBCalm Database Command Server (Go)
+After=network.target mysql.service mariadb.service
+Wants=mysql.service mariadb.service
+
+[Service]
+Type=simple
+User=mysql
+Group=mysql
+ExecStart=/usr/local/bin/dbcalm-db-cmd
+Restart=on-failure
+RestartSec=5s
+StandardOutput=null
+StandardError=null
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/run/dbcalm /var/backups/dbcalm /var/lib/dbcalm /var/log/dbcalm /tmp
+
+[Install]
+WantedBy=multi-user.target

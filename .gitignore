@@ -1,0 +1,80 @@
+# Logs
+frontend/logs
+frontend/*.log
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+frontend/lerna-debug.log*
+
+frontend/node_modules
+frontend/dist
+frontend/dist-ssr
+frontend/*.local
+
+# Binaries
+cmd/dbcalm-db-cmd
+cmd/dbcalm-cmd
+app/dbcalm
+app/bin/
+
+# NEW: Compiled binary in app/ root
+dbcalm
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# NEW: Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# NEW: Config files that might contain secrets
+*.dev.yml
+*.prod.yml
+config.*.yml
+*.local.yml
+
+# NEW: Environment files
+.env
+.env.*
+!.env.example
+
+# NEW: Log files
+*.log
+logs/
+
+# NEW: Temporary files
+tmp/
+temp/
+*.tmp
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+
+
+
+
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
