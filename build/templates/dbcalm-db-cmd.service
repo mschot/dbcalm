@@ -1,0 +1,16 @@
+[Unit]
+Description=DBCalm Database Command Service
+After=network.target
+
+[Service]
+User=mysql
+Group=dbcalm
+WorkingDirectory=/usr/bin/
+ExecStart=/usr/bin/dbcalm-db-cmd
+Restart=always
+Environment="PATH=/usr/bin:/bin"
+RuntimeDirectory=dbcalm
+RuntimeDirectoryMode=2774
+
+[Install]
+WantedBy=multi-user.target

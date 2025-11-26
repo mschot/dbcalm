@@ -12,6 +12,8 @@ import (
 	"github.com/martijn/dbcalm/internal/core/repository"
 	"github.com/martijn/dbcalm/internal/core/service"
 	"github.com/martijn/dbcalm/pkg/config"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 type Server struct {
@@ -129,6 +131,15 @@ func NewServer(
 			"time":   time.Now().Format(time.RFC3339),
 		})
 	})
+
+	// OpenAPI/Swagger documentation
+	router.GET("/openapi.yaml", func(c *gin.Context) {
+		c.File("./api/openapi.yaml")
+	})
+	router.GET("/docs/*any", ginSwagger.WrapHandler(
+		swaggerFiles.Handler,
+		ginSwagger.URL("/openapi.yaml"),
+	))
 
 	server := &Server{
 		router: router,

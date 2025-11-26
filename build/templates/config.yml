@@ -1,0 +1,24 @@
+# Database type: mariadb or mysql
+# - mariadb: Use MariaDB with mariabackup (default)
+# - mysql: Use MySQL/Percona with xtrabackup
+db_type: mariadb
+
+# Database data directory (default: /var/lib/mysql)
+# Used by XtraBackup for MySQL restore operations
+data_dir: /var/lib/mysql
+
+backup_dir: /var/backups/dbcalm
+ssl_cert: /etc/dbcalm/ssl/fullchain-cert.pem
+ssl_key: /etc/dbcalm/ssl/private-key.pem
+jwt_secret_key: replace_with_key
+cors_origins:
+  - http://localhost:5173
+
+# Optional: Override backup binary path
+# For MariaDB: backup_bin: /usr/bin/mariabackup
+# For MySQL/Percona: backup_bin: /usr/bin/xtrabackup
+# backup_bin: /usr/bin/xtrabackup
+
+# api_host: "0.0.0.0"
+# api_port: 8335
+# jwt_algorithm: "HS256"

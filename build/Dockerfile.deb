@@ -1,0 +1,47 @@
+# Dockerfile for building DBCalm Debian packages
+# Uses Ubuntu 22.04 LTS for GLIBC compatibility
+FROM ubuntu:22.04
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install build dependencies (without golang from repos - too old)
+RUN apt-get update && apt-get install -y \
+    git \
+    make \
+    curl \
+    dpkg-dev \
+    wget \
+    tar \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Go 1.23.5 (or latest stable) from official source
+RUN wget -q https://go.dev/dl/go1.23.5.linux-amd64.tar.gz && \
+    tar -C /usr/local -xzf go1.23.5.linux-amd64.tar.gz && \
+    rm go1.23.5.linux-amd64.tar.gz
+
+# Set up Go environment
+ENV GOPATH="/go"
+ENV PATH="/usr/local/go/bin:${GOPATH}/bin:${PATH}"
+
+# Install nFPM using Go
+RUN go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest && \
+    cp /go/bin/nfpm /usr/local/bin/nfpm
+
+# Create working directory
+WORKDIR /build
+
+# Copy Go module files first (for dependency caching)
+COPY app/go.mod app/go.sum ./app/
+COPY cmd/go.mod cmd/go.sum ./cmd/
+COPY cmd/shared/go.mod ./cmd/shared/
+
+# Download dependencies (this layer will be cached unless go.mod/go.sum changes)
+RUN cd app && go mod download && \
+    cd ../cmd && go mod download
+
+# Copy the rest of the project files
+COPY . .
+
+# Build command
+CMD ["./build/build-deb.sh"]

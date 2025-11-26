@@ -1,0 +1,16 @@
+[Unit]
+Description=Dbcalm
+After=network.target
+
+[Service]
+User=dbcalm
+Group=dbcalm
+WorkingDirectory=/usr/bin/
+ExecStart=/usr/bin/dbcalm server
+Restart=always
+Environment="PATH=/usr/bin:/bin"
+RuntimeDirectory=dbcalm
+RuntimeDirectoryMode=2774
+
+[Install]
+WantedBy=multi-user.target

@@ -12,11 +12,13 @@ frontend/dist
 frontend/dist-ssr
 frontend/*.local
 
-# Binaries
+# Binaries and packages
 cmd/dbcalm-db-cmd
 cmd/dbcalm-cmd
 app/dbcalm
 app/bin/
+build/dist/*
+bin/*
 
 # NEW: Compiled binary in app/ root
 dbcalm

@@ -1,0 +1,1556 @@
+openapi: 3.0.3
+info:
+  title: DBCalm API
+  description: Database backup and restore management API for MariaDB/MySQL
+  version: 0.0.1
+  contact:
+    name: DBCalm
+    url: https://dbcalm.com
+  license:
+    name: Business Source License 1.1
+    identifier: BUSL-1.1
+    url: https://github.com/mschot/dbcalm-open-backend/blob/main/LICENSE
+
+servers:
+  - url: http://localhost:8335
+    description: Local development server
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Authentication
+    description: User and client authentication endpoints
+  - name: Backups
+    description: Database backup management
+  - name: Restores
+    description: Database restore operations
+  - name: Schedules
+    description: Backup scheduling management
+  - name: Clients
+    description: API client management
+  - name: Processes
+    description: Background process status
+  - name: Cleanup
+    description: Backup cleanup operations
+
+paths:
+  /auth/authorize:
+    post:
+      tags:
+        - Authentication
+      summary: Authenticate user and get authorization code
+      description: Authenticate with username and password to get authorization code for OAuth2 flow
+      operationId: authorize
+      security: []  # This endpoint doesn't require auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthorizeRequest'
+            examples:
+              user_login:
+                summary: User login
+                description: Authenticate with username and password to get authorization code
+                value:
+                  username: admin
+                  password: your-secure-password
+      responses:
+        '200':
+          description: Authorization successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizeResponse'
+              example:
+                code: authcode_1729234567
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: Username and/or password did not match
+
+  /auth/token:
+    post:
+      tags:
+        - Authentication
+      summary: Exchange credentials for access token
+      description: Token endpoint supporting client_credentials and authorization_code grant types
+      operationId: token
+      security: []  # This endpoint doesn't require auth
+      requestBody:
+        required: true
+        description: Token request - use appropriate grant type
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/TokenClientRequest'
+                - $ref: '#/components/schemas/TokenAuthCodeRequest'
+              discriminator:
+                propertyName: grant_type
+                mapping:
+                  client_credentials: '#/components/schemas/TokenClientRequest'
+                  authorization_code: '#/components/schemas/TokenAuthCodeRequest'
+            examples:
+              client_credentials:
+                summary: Client Credentials Grant
+                description: Use for machine-to-machine authentication
+                value:
+                  grant_type: client_credentials
+                  client_id: your-client-id
+                  client_secret: your-client-secret
+              authorization_code:
+                summary: Authorization Code Grant
+                description: Use for user authentication via authorization code
+                value:
+                  grant_type: authorization_code
+                  code: authcode_1234567890
+      responses:
+        '200':
+          description: Token issued successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+              example:
+                access_token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjbGllbnRfYTFiMmMzZDRlNWY2IiwiZXhwIjoxNzI5MjM4MTY3LCJzY29wZXMiOlsiKiJdfQ.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk
+                token_type: bearer
+        '400':
+          description: Bad Request - invalid grant type or missing fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_grant:
+                  value:
+                    detail: Unsupported grant type
+                invalid_credentials:
+                  value:
+                    detail: Invalid client credentials
+
+  /backups:
+    post:
+      tags:
+        - Backups
+      summary: Create a database backup
+      description: |
+        Create a database backup.
+
+        **This is an asynchronous operation** - returns 202 Accepted immediately
+        and the backup runs in the background. Use the returned `link` to poll
+        for completion status at `/status/{pid}`.
+
+        Creates either a full or incremental backup of the MySQL/MariaDB database.
+        For incremental backups, automatically uses the latest backup as base if
+        `from_backup_id` is not specified.
+
+        **Requirements:**
+        - MySQL/MariaDB server must be running
+        - Valid credentials file must exist
+        - For incremental backups: at least one previous backup must exist
+
+        **Backup ID:**
+        - Auto-generated timestamp format: YYYY-MM-DD-HH-MM-SS
+        - Or provide custom ID (converted to kebab-case)
+
+        **Response:**
+        - Returns immediately with 202 Accepted
+        - Includes `link` field pointing to `/status/{pid}` for progress tracking
+        - Includes `resource_id` (the backup ID)
+      operationId: createBackup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BackupRequest'
+            examples:
+              full_backup:
+                summary: Full backup with auto-generated ID
+                description: Create a complete backup with timestamp-based ID
+                value:
+                  type: full
+              full_backup_custom_id:
+                summary: Full backup with custom ID
+                description: Create a complete backup with custom identifier
+                value:
+                  type: full
+                  id: production-backup-2024-10-18
+              incremental_backup:
+                summary: Incremental backup
+                description: Create incremental backup from latest base backup
+                value:
+                  type: incremental
+              incremental_backup_specific:
+                summary: Incremental backup from specific base
+                description: Create incremental backup from specific base backup
+                value:
+                  type: incremental
+                  from_backup_id: '2024-10-17-03-00-00'
+      responses:
+        '202':
+          description: Backup accepted and started - processing in background
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+              example:
+                status: running
+                link: /status/1234
+                pid: '1234'
+                resource_id: '2024-10-18-03-00-00'
+        '404':
+          description: No existing backups found for incremental backup
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: No backups found to create incremental backup from
+        '503':
+          description: Service unavailable - server configuration issue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                server_not_running:
+                  summary: MySQL server not running
+                  value:
+                    detail: 'cannot create backup, MySQL/MariaDB server is not running'
+                credentials_missing:
+                  summary: Credentials file missing
+                  value:
+                    detail: credentials file not found or missing [client-dbcalm] section
+
+    get:
+      tags:
+        - Backups
+      summary: List backups with filtering and pagination
+      description: |
+        Get a paginated list of backups with optional filtering and ordering
+
+        **Query format:** 'field|value' or 'field|operator|value'
+        **Operators:** eq, ne, gt, gte, lt, lte, in, nin
+        **Valid query fields:** id, from_backup_id, start_time, end_time, process_id, schedule_id
+        **Valid order fields:** id, start_time, end_time
+      operationId: listBackups
+      parameters:
+        - name: query
+          in: query
+          description: Filter string (e.g., 'id|2024-10-17-12-00-00' or 'start_time|gte|2024-10-01T00:00:00')
+          required: false
+          schema:
+            type: string
+          examples:
+            by_id:
+              summary: Filter by ID
+              value: 'id|2024-10-17-12-00-00'
+            by_date_range:
+              summary: Filter by start time
+              value: 'start_time|gte|2024-10-01T00:00:00'
+            by_process_list:
+              summary: Filter by process IDs
+              value: 'process_id|in|1,2,3'
+        - name: order
+          in: query
+          description: Order string (e.g., 'start_time|desc')
+          required: false
+          schema:
+            type: string
+          examples:
+            newest_first:
+              summary: Newest first
+              value: 'start_time|desc'
+            oldest_first:
+              summary: Oldest first
+              value: 'start_time|asc'
+        - name: page
+          in: query
+          description: Page number
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: per_page
+          in: query
+          description: Items per page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 25
+      responses:
+        '200':
+          description: List of backups
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupListResponse'
+              example:
+                items:
+                  - id: '2024-10-18-03-00-00'
+                    from_backup_id: null
+                    start_time: '2024-10-18T03:00:00'
+                    end_time: '2024-10-18T03:15:32'
+                    process_id: 1234
+                  - id: '2024-10-18-09-00-00'
+                    from_backup_id: '2024-10-18-03-00-00'
+                    start_time: '2024-10-18T09:00:00'
+                    end_time: '2024-10-18T09:05:18'
+                    process_id: 1235
+                pagination:
+                  total: 42
+                  page: 1
+                  per_page: 25
+                  total_pages: 2
+        '400':
+          description: Invalid query or order field
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /backups/{id}:
+    get:
+      tags:
+        - Backups
+      summary: Get backup by ID
+      description: Retrieve details of a specific backup
+      operationId: getBackup
+      parameters:
+        - name: id
+          in: path
+          description: Backup ID
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Backup details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupResponse'
+              example:
+                id: '2024-10-18-03-00-00'
+                from_backup_id: null
+                start_time: '2024-10-18T03:00:00'
+                end_time: '2024-10-18T03:15:32'
+                process_id: 1234
+        '404':
+          description: Backup not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: Backup not found
+
+  /restore:
+    post:
+      tags:
+        - Restores
+      summary: Restore a backup
+      description: |
+        Restore a backup to database or folder.
+
+        **This is an asynchronous operation** - returns 202 Accepted immediately
+        and the restore runs in the background. Use the returned `link` to poll
+        for completion status at `/status/{pid}`.
+
+        Restores a backup and all its dependencies to either the MySQL data directory
+        or a custom folder for inspection. For incremental backups, all required base
+        backups are automatically included in the restore operation.
+
+        **Requirements for database restore:**
+        - MySQL/MariaDB server must be stopped
+        - Data directory must be empty
+        - Valid credentials file must exist
+
+        **For folder restore:**
+        - No special requirements, data is restored to a temporary inspection folder
+
+        **Response:**
+        - Returns immediately with 202 Accepted
+        - Includes `link` field pointing to `/status/{pid}` for progress tracking
+        - Includes `resource_id` (the backup ID being restored)
+      operationId: createRestore
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RestoreRequest'
+            examples:
+              restore_to_database:
+                summary: Restore to database
+                description: Restore a backup directly to MySQL/MariaDB data directory
+                value:
+                  id: '2024-10-17-03-00-00'
+                  target: database
+              restore_to_folder:
+                summary: Restore to folder for inspection
+                description: Restore a backup to a temporary folder for inspection
+                value:
+                  id: '2024-10-17-03-00-00'
+                  target: folder
+      responses:
+        '202':
+          description: Restore accepted and started - processing in background
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+              example:
+                status: running
+                link: /status/5678
+                pid: '5678'
+                resource_id: '2024-10-17-03-00-00'
+        '404':
+          description: Backup not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: Backup with id xyz not found
+        '503':
+          description: Service unavailable - server configuration issue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                server_running:
+                  summary: MySQL server still running
+                  value:
+                    detail: 'cannot restore to database, MySQL/MariaDb server is not stopped'
+                data_dir_not_empty:
+                  summary: Data directory not empty
+                  value:
+                    detail: 'cannot restore to database, mysql/mariadb data directory is not empty (usually /var/lib/mysql)'
+                credentials_missing:
+                  summary: Credentials file missing
+                  value:
+                    detail: credentials file not found or missing [client-dbcalm] section
+
+  /restores:
+    get:
+      tags:
+        - Restores
+      summary: List restores with filtering and pagination
+      description: |
+        Get a paginated list of restores with optional filtering and ordering
+
+        **Query format:** 'field|value' or 'field|operator|value'
+        **Valid fields:** backup_id, target, start_time, end_time, process_id
+      operationId: listRestores
+      parameters:
+        - name: query
+          in: query
+          description: Filter string
+          required: false
+          schema:
+            type: string
+        - name: order
+          in: query
+          description: Order string
+          required: false
+          schema:
+            type: string
+        - name: page
+          in: query
+          description: Page number
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: per_page
+          in: query
+          description: Items per page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 25
+      responses:
+        '200':
+          description: List of restores with pagination
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreListResponse'
+        '400':
+          description: Invalid query or order field
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /schedules:
+    post:
+      tags:
+        - Schedules
+      summary: Create a backup schedule
+      description: |
+        Create a new scheduled backup. Incremental schedules require at least one enabled full backup schedule.
+
+        **Frequency types:** daily, weekly, monthly, hourly, interval
+        - For weekly: specify day_of_week (0-6, 0=Sunday)
+        - For monthly: specify day_of_month (1-28)
+        - For interval: specify interval_value and interval_unit (minutes/hours)
+      operationId: createSchedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleRequest'
+            examples:
+              daily_full_backup:
+                summary: Daily full backup at 3:00 AM
+                description: Schedule a daily full backup at 3:00 AM
+                value:
+                  backup_type: full
+                  frequency: daily
+                  hour: 3
+                  minute: 0
+                  enabled: true
+              weekly_incremental_backup:
+                summary: Weekly incremental backup on Sundays
+                description: Schedule incremental backup every Sunday at 3:30 AM
+                value:
+                  backup_type: incremental
+                  frequency: weekly
+                  day_of_week: 0
+                  hour: 3
+                  minute: 30
+                  enabled: true
+              monthly_backup:
+                summary: Monthly backup on 1st at midnight
+                description: Schedule monthly full backup on 1st day at 00:00
+                value:
+                  backup_type: full
+                  frequency: monthly
+                  day_of_month: 1
+                  hour: 0
+                  minute: 0
+                  enabled: true
+              interval_backup:
+                summary: Every 4 hours incremental backup
+                description: Schedule incremental backup every 4 hours
+                value:
+                  backup_type: incremental
+                  frequency: interval
+                  interval_value: 4
+                  interval_unit: hours
+                  enabled: true
+      responses:
+        '201':
+          description: Schedule created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleResponse'
+              example:
+                id: 1
+                backup_type: full
+                frequency: daily
+                day_of_week: null
+                day_of_month: null
+                hour: 3
+                minute: 0
+                interval_value: null
+                interval_unit: null
+                enabled: true
+                created_at: '2024-10-18T10:30:00'
+                updated_at: '2024-10-18T10:30:00'
+        '400':
+          description: Bad Request - validation failed or no full schedule exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: Cannot create incremental backup schedule without at least one enabled full backup schedule
+
+    get:
+      tags:
+        - Schedules
+      summary: List schedules with filtering and pagination
+      description: Get a paginated list of backup schedules with optional filtering and ordering
+      operationId: listSchedules
+      parameters:
+        - name: query
+          in: query
+          description: Filter string
+          required: false
+          schema:
+            type: string
+        - name: order
+          in: query
+          description: Order string
+          required: false
+          schema:
+            type: string
+        - name: page
+          in: query
+          description: Page number
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: per_page
+          in: query
+          description: Items per page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 25
+      responses:
+        '200':
+          description: List of schedules
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleListResponse'
+
+  /schedules/{id}:
+    get:
+      tags:
+        - Schedules
+      summary: Get schedule by ID
+      description: Retrieve details of a specific schedule
+      operationId: getSchedule
+      parameters:
+        - name: id
+          in: path
+          description: Schedule ID
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Schedule details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleResponse'
+        '404':
+          description: Schedule not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: Schedule not found
+
+    put:
+      tags:
+        - Schedules
+      summary: Update a schedule
+      description: Update an existing backup schedule. Cannot change to incremental without full schedules.
+      operationId: updateSchedule
+      parameters:
+        - name: id
+          in: path
+          description: Schedule ID
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleRequest'
+      responses:
+        '200':
+          description: Schedule updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleResponse'
+        '400':
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Schedule not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags:
+        - Schedules
+      summary: Delete a schedule
+      description: Delete a backup schedule and update cron configuration
+      operationId: deleteSchedule
+      parameters:
+        - name: id
+          in: path
+          description: Schedule ID
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Schedule deleted successfully
+        '404':
+          description: Schedule not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /clients:
+    post:
+      tags:
+        - Clients
+      summary: Create a new API client
+      description: Create a new client with auto-generated ID and secret. Secret is only shown on creation!
+      operationId: createClient
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateClientRequest'
+            examples:
+              production_client:
+                summary: Production API client
+                value:
+                  label: Production API Client
+              backup_automation:
+                summary: Backup automation client
+                value:
+                  label: Backup Automation
+      responses:
+        '201':
+          description: Client created with secret
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientCreateResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    get:
+      tags:
+        - Clients
+      summary: List API clients
+      description: Get a paginated list of API clients (secrets not included)
+      operationId: listClients
+      parameters:
+        - name: query
+          in: query
+          description: Filter string
+          required: false
+          schema:
+            type: string
+        - name: order
+          in: query
+          description: Order string
+          required: false
+          schema:
+            type: string
+        - name: page
+          in: query
+          description: Page number
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: per_page
+          in: query
+          description: Items per page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 25
+      responses:
+        '200':
+          description: List of clients
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientListResponse'
+
+  /clients/{id}:
+    get:
+      tags:
+        - Clients
+      summary: Get client by ID
+      description: Retrieve details of a specific client (secret not included)
+      operationId: getClient
+      parameters:
+        - name: id
+          in: path
+          description: Client ID
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Client details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientResponse'
+        '404':
+          description: Client not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    put:
+      tags:
+        - Clients
+      summary: Update client label
+      description: Update the label of an existing client
+      operationId: updateClient
+      parameters:
+        - name: id
+          in: path
+          description: Client ID
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateClientRequest'
+      responses:
+        '200':
+          description: Client updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientResponse'
+        '404':
+          description: Client not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags:
+        - Clients
+      summary: Delete a client
+      description: Delete an API client
+      operationId: deleteClient
+      parameters:
+        - name: id
+          in: path
+          description: Client ID
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Client deleted successfully
+        '404':
+          description: Client not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /processes:
+    get:
+      tags:
+        - Processes
+      summary: List processes with filtering and pagination
+      description: |
+        Get a paginated list of backup/restore processes
+
+        **Valid query fields:** status, type, command_id, start_time, end_time, return_code
+      operationId: listProcesses
+      parameters:
+        - name: query
+          in: query
+          description: Filter string
+          required: false
+          schema:
+            type: string
+        - name: order
+          in: query
+          description: Order string
+          required: false
+          schema:
+            type: string
+        - name: page
+          in: query
+          description: Page number
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: per_page
+          in: query
+          description: Items per page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 25
+      responses:
+        '200':
+          description: List of processes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessListResponse'
+
+  /status/{command_id}:
+    get:
+      tags:
+        - Processes
+      summary: Get process status by command ID
+      description: |
+        Retrieve status of a background process (used for polling async operations)
+
+        **Status values:** running, completed, failed
+      operationId: getProcessByCommandID
+      parameters:
+        - name: command_id
+          in: path
+          description: Command/Process ID
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Process status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '404':
+          description: Process not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /cleanup:
+    post:
+      tags:
+        - Cleanup
+      summary: Run backup cleanup
+      description: |
+        Clean up old backups based on retention policies. Returns 202 Accepted for async operation.
+
+        If no schedule_id provided, cleans up all schedules with retention policies.
+      operationId: cleanup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CleanupRequest'
+            examples:
+              cleanup_all:
+                summary: Clean up all schedules
+                value:
+                  schedule_id: null
+              cleanup_specific:
+                summary: Clean up specific schedule
+                value:
+                  schedule_id: 1
+      responses:
+        '202':
+          description: Cleanup accepted and started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '404':
+          description: Schedule not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from /auth/token endpoint
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        detail:
+          type: string
+          description: Error message
+      required:
+        - detail
+
+    AuthorizeRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          description: Username for authentication
+        password:
+          type: string
+          description: Password for authentication
+      required:
+        - username
+        - password
+
+    AuthorizeResponse:
+      type: object
+      properties:
+        code:
+          type: string
+          description: Authorization code (valid for 10 minutes)
+          example: authcode_1729234567
+      required:
+        - code
+
+    TokenClientRequest:
+      type: object
+      properties:
+        grant_type:
+          type: string
+          enum: [client_credentials]
+          description: OAuth2 grant type
+        client_id:
+          type: string
+          description: Client ID
+        client_secret:
+          type: string
+          description: Client secret
+      required:
+        - grant_type
+        - client_id
+        - client_secret
+
+    TokenAuthCodeRequest:
+      type: object
+      properties:
+        grant_type:
+          type: string
+          enum: [authorization_code]
+          description: OAuth2 grant type
+        code:
+          type: string
+          description: Authorization code from /auth/authorize
+      required:
+        - grant_type
+        - code
+
+    TokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: JWT access token
+        token_type:
+          type: string
+          description: Token type (always 'bearer')
+          example: bearer
+      required:
+        - access_token
+        - token_type
+
+    BackupRequest:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [full, incremental]
+          description: Type of backup to create
+        id:
+          type: string
+          description: Custom backup ID (optional, auto-generated if not provided)
+          nullable: true
+        from_backup_id:
+          type: string
+          description: Base backup ID for incremental backups (optional, uses latest if not provided)
+          nullable: true
+        schedule_id:
+          type: integer
+          description: Schedule ID if backup is created by a schedule
+          nullable: true
+      required:
+        - type
+
+    BackupResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique backup identifier
+          example: '2024-10-18-03-00-00'
+        from_backup_id:
+          type: string
+          description: Base backup ID for incremental backups
+          nullable: true
+        start_time:
+          type: string
+          format: date-time
+          description: When backup started
+        end_time:
+          type: string
+          format: date-time
+          description: When backup completed
+          nullable: true
+        process_id:
+          type: integer
+          description: Process ID
+        schedule_id:
+          type: integer
+          description: Schedule that created this backup
+          nullable: true
+        size:
+          type: integer
+          description: Backup size in bytes
+          nullable: true
+        retention_value:
+          type: integer
+          description: Retention value from schedule
+          nullable: true
+        retention_unit:
+          type: string
+          description: Retention unit from schedule
+          nullable: true
+      required:
+        - id
+        - start_time
+        - process_id
+
+    BackupListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BackupResponse'
+        pagination:
+          $ref: '#/components/schemas/PaginationInfo'
+      required:
+        - items
+        - pagination
+
+    RestoreRequest:
+      type: object
+      properties:
+        id:
+          type: string
+          description: ID of the backup to restore
+        target:
+          type: string
+          enum: [database, folder]
+          description: "Restore target: 'database' (to MySQL data dir) or 'folder' (to custom folder for inspection)"
+      required:
+        - id
+        - target
+
+    RestoreResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Restore operation ID
+        backup_id:
+          type: string
+          description: Backup ID being restored
+        target:
+          type: string
+          enum: [database, folder]
+          description: Restore target
+        start_time:
+          type: string
+          format: date-time
+          description: When restore started
+        end_time:
+          type: string
+          format: date-time
+          description: When restore completed
+          nullable: true
+        process_id:
+          type: integer
+          description: Process ID
+      required:
+        - id
+        - backup_id
+        - target
+        - start_time
+        - process_id
+
+    RestoreListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RestoreResponse'
+        pagination:
+          $ref: '#/components/schemas/PaginationInfo'
+      required:
+        - items
+        - pagination
+
+    ScheduleRequest:
+      type: object
+      properties:
+        backup_type:
+          type: string
+          enum: [full, incremental]
+          description: Type of backup to schedule
+        frequency:
+          type: string
+          enum: [daily, weekly, monthly, hourly, interval]
+          description: Schedule frequency type
+        day_of_week:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: Day of week for weekly schedules (0=Sunday)
+          nullable: true
+        day_of_month:
+          type: integer
+          minimum: 1
+          maximum: 28
+          description: Day of month for monthly schedules
+          nullable: true
+        hour:
+          type: integer
+          minimum: 0
+          maximum: 23
+          description: Hour of day for scheduled backups
+          nullable: true
+        minute:
+          type: integer
+          minimum: 0
+          maximum: 59
+          description: Minute of hour for scheduled backups
+          nullable: true
+        interval_value:
+          type: integer
+          minimum: 1
+          description: Interval value for interval-based schedules
+          nullable: true
+        interval_unit:
+          type: string
+          enum: [minutes, hours]
+          description: Interval unit for interval-based schedules
+          nullable: true
+        retention_value:
+          type: integer
+          minimum: 1
+          description: Number of retention units to keep backups
+          nullable: true
+        retention_unit:
+          type: string
+          enum: [days, weeks, months]
+          description: Retention time unit
+          nullable: true
+        enabled:
+          type: boolean
+          description: Whether schedule is enabled
+          default: true
+      required:
+        - backup_type
+        - frequency
+
+    ScheduleResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Schedule ID
+        backup_type:
+          type: string
+          enum: [full, incremental]
+          description: Type of backup
+        frequency:
+          type: string
+          enum: [daily, weekly, monthly, hourly, interval]
+          description: Schedule frequency
+        day_of_week:
+          type: integer
+          minimum: 0
+          maximum: 6
+          nullable: true
+        day_of_month:
+          type: integer
+          minimum: 1
+          maximum: 28
+          nullable: true
+        hour:
+          type: integer
+          minimum: 0
+          maximum: 23
+          nullable: true
+        minute:
+          type: integer
+          minimum: 0
+          maximum: 59
+          nullable: true
+        interval_value:
+          type: integer
+          nullable: true
+        interval_unit:
+          type: string
+          enum: [minutes, hours]
+          nullable: true
+        retention_value:
+          type: integer
+          nullable: true
+        retention_unit:
+          type: string
+          enum: [days, weeks, months]
+          nullable: true
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - backup_type
+        - frequency
+        - enabled
+        - created_at
+        - updated_at
+
+    ScheduleListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScheduleResponse'
+        pagination:
+          $ref: '#/components/schemas/PaginationInfo'
+      required:
+        - items
+        - pagination
+
+    CreateClientRequest:
+      type: object
+      properties:
+        label:
+          type: string
+          description: Human-readable label for the client
+      required:
+        - label
+
+    UpdateClientRequest:
+      type: object
+      properties:
+        label:
+          type: string
+          description: Updated label for the client
+      required:
+        - label
+
+    ClientResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Client ID
+        label:
+          type: string
+          description: Client label
+        scopes:
+          type: array
+          items:
+            type: string
+          description: Client scopes
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - label
+        - scopes
+        - created_at
+        - updated_at
+
+    ClientCreateResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Client ID
+        label:
+          type: string
+          description: Client label
+        secret:
+          type: string
+          description: Client secret (ONLY shown on creation)
+        scopes:
+          type: array
+          items:
+            type: string
+          description: Client scopes
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - label
+        - secret
+        - scopes
+        - created_at
+        - updated_at
+
+    ClientListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClientResponse'
+        pagination:
+          $ref: '#/components/schemas/PaginationInfo'
+      required:
+        - items
+        - pagination
+
+    ProcessResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Process ID
+        command_id:
+          type: string
+          description: Command ID
+        type:
+          type: string
+          description: Process type
+        status:
+          type: string
+          enum: [running, completed, failed]
+          description: Process status
+        start_time:
+          type: string
+          format: date-time
+        end_time:
+          type: string
+          format: date-time
+          nullable: true
+        return_code:
+          type: integer
+          nullable: true
+      required:
+        - id
+        - command_id
+        - type
+        - status
+        - start_time
+
+    ProcessListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProcessResponse'
+        pagination:
+          $ref: '#/components/schemas/PaginationInfo'
+      required:
+        - items
+        - pagination
+
+    StatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [running, completed, failed]
+          description: Process status
+        link:
+          type: string
+          description: Link to poll for status updates
+          example: /status/1234
+        pid:
+          type: string
+          description: Process ID
+        resource_id:
+          type: string
+          description: ID of the resource being created/modified
+          nullable: true
+      required:
+        - status
+        - link
+        - pid
+
+    CleanupRequest:
+      type: object
+      properties:
+        schedule_id:
+          type: integer
+          description: Schedule ID to cleanup (null for all schedules)
+          nullable: true
+
+    PaginationInfo:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of items
+        page:
+          type: integer
+          description: Current page number
+        per_page:
+          type: integer
+          description: Items per page
+        total_pages:
+          type: integer
+          description: Total number of pages
+      required:
+        - total
+        - page
+        - per_page
+        - total_pages

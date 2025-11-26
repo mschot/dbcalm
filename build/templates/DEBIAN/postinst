@@ -1,0 +1,25 @@
+#!/bin/bash
+set -e
+
+project_name="dbcalm"
+
+# Call shared common setup script
+/usr/share/$project_name/scripts/common-setup.sh "$project_name"
+
+# Enable and start services (only if systemd is actually running)
+# Check if systemd is running as PID 1
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+    systemctl enable $project_name-api
+    systemctl enable $project_name-cmd
+    systemctl enable $project_name-mariadb-cmd
+
+    # Only attempt to start services if system is not in chroot (during package install)
+    if [ -z "$DPKG_ROOT" ]; then
+        systemctl start $project_name-api
+        systemctl start $project_name-cmd
+        systemctl start $project_name-mariadb-cmd
+    fi
+fi
+
+exit 0

@@ -1,0 +1,118 @@
+name: "dbcalm"
+arch: "amd64"
+platform: "linux"
+version: "${VERSION}"
+section: "database"
+priority: "optional"
+maintainer: "DBCalm Team <info@dbcalm.com>"
+description: |
+  DBCalm - Database Backup and Management Solution
+  A comprehensive backup and management solution for MariaDB and MySQL databases.
+vendor: "DBCalm"
+homepage: "https://dbcalm.com"
+license: "Proprietary"
+
+# Files to include in package
+contents:
+  # Binaries
+  - src: ./bin/dbcalm
+    dst: /usr/bin/dbcalm
+    file_info:
+      mode: 0750
+      owner: mysql
+      group: dbcalm
+
+  - src: ./bin/dbcalm-cmd
+    dst: /usr/bin/dbcalm-cmd
+    file_info:
+      mode: 0750
+      owner: root
+      group: dbcalm
+
+  - src: ./bin/dbcalm-db-cmd
+    dst: /usr/bin/dbcalm-db-cmd
+    file_info:
+      mode: 0750
+      owner: mysql
+      group: dbcalm
+
+  # Systemd service files
+  - src: ./build/templates/dbcalm-api.service
+    dst: /usr/lib/systemd/system/dbcalm-api.service
+    file_info:
+      mode: 0644
+
+  - src: ./build/templates/dbcalm-cmd.service
+    dst: /usr/lib/systemd/system/dbcalm-cmd.service
+    file_info:
+      mode: 0644
+
+  - src: ./build/templates/dbcalm-db-cmd.service
+    dst: /usr/lib/systemd/system/dbcalm-db-cmd.service
+    file_info:
+      mode: 0644
+
+  # Configuration files (marked as config to preserve user edits)
+  - src: ./build/templates/config.yml
+    dst: /etc/dbcalm/config.yml
+    type: config|noreplace
+    file_info:
+      mode: 0640
+      owner: dbcalm
+      group: dbcalm
+
+  - src: ./build/templates/credentials.cnf
+    dst: /etc/dbcalm/credentials.cnf
+    type: config|noreplace
+    file_info:
+      mode: 0640
+      owner: mysql
+      group: dbcalm
+
+  # Setup scripts
+  - src: ./build/templates/scripts/common-setup.sh
+    dst: /usr/share/dbcalm/scripts/common-setup.sh
+    file_info:
+      mode: 0755
+
+  # Create empty directories
+  - dst: /var/lib/dbcalm
+    type: dir
+    file_info:
+      mode: 02775
+      owner: mysql
+      group: dbcalm
+
+  - dst: /var/log/dbcalm
+    type: dir
+    file_info:
+      mode: 02770
+      owner: mysql
+      group: dbcalm
+
+  - dst: /var/backups/dbcalm
+    type: dir
+    file_info:
+      mode: 0770
+      owner: mysql
+      group: dbcalm
+
+# Dependencies
+depends:
+  - mariadb-server | mysql-server | percona-server-server
+
+# Post-install script
+scripts:
+  postinstall: ./build/templates/scripts/common-setup.sh
+
+# RPM-specific configuration
+rpm:
+  compression: xz
+  signature:
+    key_file: ""  # Add GPG key path if signing
+
+# DEB-specific configuration
+deb:
+  compression: xz
+  signature:
+    key_file: ""  # Add GPG key path if signing

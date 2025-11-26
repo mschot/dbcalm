@@ -1,0 +1,31 @@
+services:
+  test-runner:
+    build:
+      context: ../${DISTRO_DIR:-debian}
+      dockerfile: Dockerfile
+      args:
+        DB_TYPE: ${DB_TYPE:-mariadb}
+    volumes:
+      - ../artifacts:/tests/artifacts:ro  # Compiled binaries (mounted, not copied)
+      - ../test-results:/tests/test-results:rw  # Test results output
+      - ./scripts:/tests/scripts:ro  # Setup and entrypoint scripts
+      - ./fixtures:/tests/fixtures:ro  # SQL fixtures
+      - ./tests:/tests/tests:ro  # Go test files
+      - ./utils:/tests/utils:ro  # Go utility files
+      - ./go.mod:/tests/go.mod:ro  # Go module file
+    environment:
+      - E2E_TEST_MODE=true
+      - API_BASE_URL=https://localhost:8335
+      - DISTRO=${DISTRO:-debian}
+      - DB_TYPE=${DB_TYPE:-mariadb}
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    privileged: true
+    working_dir: /tests
+    networks:
+      - dbcalm-test
+
+networks:
+  dbcalm-test:
+    driver: bridge
