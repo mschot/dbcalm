@@ -1,5 +1,6 @@
 services:
   test-runner:
+    image: dbcalm-e2e-${DISTRO:-debian}-${DB_TYPE:-mariadb}:latest
     build:
       context: ../${DISTRO_DIR:-debian}
       dockerfile: Dockerfile
@@ -13,6 +14,7 @@ services:
       - ./tests:/tests/tests:ro  # Go test files
       - ./utils:/tests/utils:ro  # Go utility files
       - ./go.mod:/tests/go.mod:ro  # Go module file
+      - ./go.sum:/tests/go.sum:ro  # Go dependencies checksum
     environment:
       - E2E_TEST_MODE=true
       - API_BASE_URL=https://localhost:8335

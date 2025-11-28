@@ -3,14 +3,13 @@ package repository
 import (
 	"context"
 
+	"github.com/martijn/dbcalm/internal/api/util"
 	"github.com/martijn/dbcalm/internal/core/domain"
 )
 
+// BackupFilter embeds ListFilter for generic query/order/pagination
 type BackupFilter struct {
-	ScheduleID *int64
-	Type       *domain.BackupType
-	Limit      int
-	Offset     int
+	util.ListFilter
 }
 
 type BackupRepository interface {
@@ -18,6 +17,7 @@ type BackupRepository interface {
 	FindByID(ctx context.Context, id string) (*domain.Backup, error)
 	Update(ctx context.Context, backup *domain.Backup) error
 	Delete(ctx context.Context, id string) error
+	DeleteMany(ctx context.Context, ids []string) error
 	List(ctx context.Context, filter BackupFilter) ([]*domain.Backup, error)
 	Count(ctx context.Context, filter BackupFilter) (int, error)
 

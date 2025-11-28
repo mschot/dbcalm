@@ -98,11 +98,13 @@ contents:
       group: dbcalm
 
 # Dependencies
+# Note: mariadb-server or mysql-server should be installed separately based on user's preference
 depends:
-  - mariadb-server | mysql-server | percona-server-server
+  - openssl
 
-# Post-install script
+# Installation scripts
 scripts:
+  preinstall: ./build/templates/scripts/preinstall.sh
   postinstall: ./build/templates/scripts/common-setup.sh
 
 # RPM-specific configuration

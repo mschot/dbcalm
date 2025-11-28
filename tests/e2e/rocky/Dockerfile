@@ -8,8 +8,7 @@ ARG DB_TYPE=mariadb
 
 ENV TZ=UTC
 
-# Install base dependencies and Go
-# Use --allowerasing to replace curl-minimal with full curl
+# Install base dependencies including Go
 RUN dnf install -y --allowerasing \
     golang \
     curl \
@@ -39,10 +38,9 @@ RUN mkdir -p /tests/fixtures \
     /tests/artifacts \
     /tests/logs \
     /tests/logs/dbcalm \
-    /tests/test-results && \
+    /tests/test-results \
+    /etc/cron.d && \
     chmod -R 777 /tests/logs /tests/test-results /tests/artifacts
-
-# Note: Scripts, fixtures, and compiled binaries will be mounted as volumes from common/ directory
 
 # Set working directory
 WORKDIR /tests

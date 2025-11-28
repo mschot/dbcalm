@@ -5,18 +5,18 @@ import (
 	"fmt"
 
 	"github.com/jmoiron/sqlx"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 const schema = `
-CREATE TABLE IF NOT EXISTS users (
+CREATE TABLE IF NOT EXISTS user (
 	username TEXT PRIMARY KEY,
 	password TEXT NOT NULL,
 	created_at DATETIME NOT NULL,
 	updated_at DATETIME NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS clients (
+CREATE TABLE IF NOT EXISTS client (
 	id TEXT PRIMARY KEY,
 	secret TEXT NOT NULL,
 	label TEXT NOT NULL,
@@ -25,16 +25,16 @@ CREATE TABLE IF NOT EXISTS clients (
 	updated_at DATETIME NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS auth_codes (
+CREATE TABLE IF NOT EXISTS auth_code (
 	code TEXT PRIMARY KEY,
 	username TEXT NOT NULL,
 	scopes TEXT NOT NULL, -- JSON array
 	expires_at DATETIME NOT NULL,
 	created_at DATETIME NOT NULL,
-	FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE
+	FOREIGN KEY (username) REFERENCES user(username) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS schedules (
+CREATE TABLE IF NOT EXISTS schedule (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	backup_type TEXT NOT NULL,
 	frequency TEXT NOT NULL,
@@ -51,9 +51,9 @@ CREATE TABLE IF NOT EXISTS schedules (
 	updated_at DATETIME NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS processes (
+CREATE TABLE IF NOT EXISTS process (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	command_id TEXT NOT NULL UNIQUE,
+	command_id TEXT NOT NULL,
 	command TEXT NOT NULL,
 	pid INTEGER,
 	status TEXT NOT NULL,
@@ -63,25 +63,23 @@ CREATE TABLE IF NOT EXISTS processes (
 	start_time DATETIME NOT NULL,
 	end_time DATETIME,
 	type TEXT NOT NULL,
-	args TEXT NOT NULL, -- JSON object
-	UNIQUE(command_id)
+	args TEXT NOT NULL -- JSON object
 );
 
-CREATE TABLE IF NOT EXISTS backups (
+CREATE TABLE IF NOT EXISTS backup (
 	id TEXT PRIMARY KEY,
-	type TEXT NOT NULL,
 	from_backup_id TEXT,
 	schedule_id INTEGER,
 	start_time DATETIME NOT NULL,
 	end_time DATETIME,
 	process_id INTEGER NOT NULL,
 	size INTEGER,
-	FOREIGN KEY (from_backup_id) REFERENCES backups(id) ON DELETE CASCADE,
-	FOREIGN KEY (schedule_id) REFERENCES schedules(id) ON DELETE SET NULL,
-	FOREIGN KEY (process_id) REFERENCES processes(id) ON DELETE CASCADE
+	FOREIGN KEY (from_backup_id) REFERENCES backup(id) ON DELETE CASCADE,
+	FOREIGN KEY (schedule_id) REFERENCES schedule(id) ON DELETE SET NULL,
+	FOREIGN KEY (process_id) REFERENCES process(id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS restores (
+CREATE TABLE IF NOT EXISTS restore (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	backup_id TEXT NOT NULL,
 	backup_timestamp DATETIME NOT NULL,
@@ -90,16 +88,16 @@ CREATE TABLE IF NOT EXISTS restores (
 	start_time DATETIME NOT NULL,
 	end_time DATETIME,
 	process_id INTEGER NOT NULL,
-	FOREIGN KEY (backup_id) REFERENCES backups(id) ON DELETE CASCADE,
-	FOREIGN KEY (process_id) REFERENCES processes(id) ON DELETE CASCADE
+	FOREIGN KEY (backup_id) REFERENCES backup(id) ON DELETE CASCADE,
+	FOREIGN KEY (process_id) REFERENCES process(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_backups_schedule_id ON backups(schedule_id);
-CREATE INDEX IF NOT EXISTS idx_backups_type ON backups(type);
-CREATE INDEX IF NOT EXISTS idx_backups_start_time ON backups(start_time);
-CREATE INDEX IF NOT EXISTS idx_processes_status ON processes(status);
-CREATE INDEX IF NOT EXISTS idx_processes_type ON processes(type);
-CREATE INDEX IF NOT EXISTS idx_auth_codes_expires_at ON auth_codes(expires_at);
+CREATE INDEX IF NOT EXISTS idx_backups_schedule_id ON backup(schedule_id);
+CREATE INDEX IF NOT EXISTS idx_backups_start_time ON backup(start_time);
+CREATE INDEX IF NOT EXISTS idx_processes_status ON process(status);
+CREATE INDEX IF NOT EXISTS idx_processes_type ON process(type);
+CREATE INDEX IF NOT EXISTS idx_processes_command_id ON process(command_id);
+CREATE INDEX IF NOT EXISTS idx_auth_codes_expires_at ON auth_code(expires_at);
 `
 
 type DB struct {
@@ -107,9 +105,19 @@ type DB struct {
 }
 
 func New(dbPath string) (*DB, error) {
-	db, err := sqlx.Connect("sqlite3", dbPath)
+	db, err := sqlx.Connect("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+
+	// Enable WAL mode for better concurrency (allows concurrent reads/writes)
+	if _, err := db.Exec("PRAGMA journal_mode = WAL"); err != nil {
+		return nil, fmt.Errorf("failed to enable WAL mode: %w", err)
+	}
+
+	// Set busy timeout to handle concurrent access from multiple services
+	if _, err := db.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+		return nil, fmt.Errorf("failed to set busy timeout: %w", err)
 	}
 
 	// Enable foreign keys

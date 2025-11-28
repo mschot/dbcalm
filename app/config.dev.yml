@@ -1,5 +1,5 @@
 # Development configuration for DBCalm
-backup_dir: /tmp/dbcalm-backups
+backup_dir: /var/backups/dbcalm
 db_type: mariadb
 jwt_secret_key: dev-secret-key-change-in-production
 api_host: 127.0.0.1

@@ -3,14 +3,13 @@ package repository
 import (
 	"context"
 
+	"github.com/martijn/dbcalm/internal/api/util"
 	"github.com/martijn/dbcalm/internal/core/domain"
 )
 
+// RestoreFilter embeds ListFilter for generic query/order/pagination
 type RestoreFilter struct {
-	BackupID *string
-	Target   *domain.RestoreTarget
-	Limit    int
-	Offset   int
+	util.ListFilter
 }
 
 type RestoreRepository interface {

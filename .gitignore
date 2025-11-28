@@ -80,3 +80,8 @@ temp/
 *.njsproj
 *.sln
 *.sw?
+
+# E2E test artifacts (packages)
+tests/e2e/artifacts/*.deb
+tests/e2e/artifacts/*.rpm
+tests/e2e/test-results/*

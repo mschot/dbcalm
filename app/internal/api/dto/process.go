@@ -16,7 +16,8 @@ type ProcessResponse struct {
 	EndTime    *time.Time             `json:"end_time,omitempty"`
 	Type       string                 `json:"type"`
 	Args       map[string]interface{} `json:"args,omitempty"`
-	Link       *string                `json:"link,omitempty"` // Link to status endpoint
+	Link       *string                `json:"link,omitempty"`       // Link to status endpoint
+	ResourceID *string                `json:"resource_id,omitempty"` // Extracted from args["id"]
 }
 
 // ProcessListResponse represents a list of processes

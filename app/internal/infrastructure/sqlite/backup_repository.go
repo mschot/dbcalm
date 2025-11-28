@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/martijn/dbcalm/internal/core/domain"
 	"github.com/martijn/dbcalm/internal/core/repository"
@@ -102,6 +103,27 @@ func (r *backupRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+func (r *backupRepository) DeleteMany(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	// Build placeholders: ?, ?, ?
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf("DELETE FROM backup WHERE id IN (%s)", strings.Join(placeholders, ","))
+	_, err := r.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to delete backups: %w", err)
+	}
+	return nil
+}
+
 func (r *backupRepository) List(ctx context.Context, filter repository.BackupFilter) ([]*domain.Backup, error) {
 	query := `
 		SELECT id, from_backup_id, schedule_id, start_time, end_time, process_id
@@ -110,31 +132,14 @@ func (r *backupRepository) List(ctx context.Context, filter repository.BackupFil
 	`
 	args := []interface{}{}
 
-	if filter.ScheduleID != nil {
-		query += " AND schedule_id = ?"
-		args = append(args, *filter.ScheduleID)
-	}
+	// Apply filters
+	query, args = ApplyFilters(query, args, filter.Filters)
 
-	if filter.Type != nil {
-		// Filter by type based on from_backup_id: full = NULL, incremental = NOT NULL
-		if *filter.Type == domain.BackupTypeFull {
-			query += " AND from_backup_id IS NULL"
-		} else {
-			query += " AND from_backup_id IS NOT NULL"
-		}
-	}
+	// Apply ordering
+	query = ApplyOrdering(query, filter.Order, "start_time DESC")
 
-	query += " ORDER BY start_time DESC"
-
-	if filter.Limit > 0 {
-		query += " LIMIT ?"
-		args = append(args, filter.Limit)
-	}
-
-	if filter.Offset > 0 {
-		query += " OFFSET ?"
-		args = append(args, filter.Offset)
-	}
+	// Apply pagination
+	query, args = ApplyPagination(query, args, filter.Page, filter.PerPage)
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -162,19 +167,8 @@ func (r *backupRepository) Count(ctx context.Context, filter repository.BackupFi
 	query := `SELECT COUNT(*) FROM backup WHERE 1=1`
 	args := []interface{}{}
 
-	if filter.ScheduleID != nil {
-		query += " AND schedule_id = ?"
-		args = append(args, *filter.ScheduleID)
-	}
-
-	if filter.Type != nil {
-		// Filter by type based on from_backup_id: full = NULL, incremental = NOT NULL
-		if *filter.Type == domain.BackupTypeFull {
-			query += " AND from_backup_id IS NULL"
-		} else {
-			query += " AND from_backup_id IS NOT NULL"
-		}
-	}
+	// Apply filters
+	query, args = ApplyFilters(query, args, filter.Filters)
 
 	var count int
 	err := r.db.QueryRowContext(ctx, query, args...).Scan(&count)
@@ -300,6 +294,7 @@ func (r *backupRepository) scanBackup(row *sql.Row) (*domain.Backup, error) {
 		return nil, fmt.Errorf("failed to scan backup: %w", err)
 	}
 
+	// Infer type from from_backup_id: NULL = full, non-NULL = incremental
 	if fromBackupID.Valid {
 		backup.FromBackupID = &fromBackupID.String
 		backup.Type = domain.BackupTypeIncremental
@@ -335,6 +330,7 @@ func (r *backupRepository) scanBackupRow(rows *sql.Rows) (*domain.Backup, error)
 		return nil, fmt.Errorf("failed to scan backup: %w", err)
 	}
 
+	// Infer type from from_backup_id: NULL = full, non-NULL = incremental
 	if fromBackupID.Valid {
 		backup.FromBackupID = &fromBackupID.String
 		backup.Type = domain.BackupTypeIncremental

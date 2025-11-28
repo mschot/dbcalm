@@ -29,10 +29,11 @@ const (
 
 // ProcessStatus represents the status response from the API
 type ProcessStatus struct {
-	Status    string                 `json:"status"`
-	Error     string                 `json:"error,omitempty"`
-	CommandID string                 `json:"command_id"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	Status     string                 `json:"status"`
+	Error      string                 `json:"error,omitempty"`
+	CommandID  string                 `json:"command_id"`
+	ResourceID string                 `json:"resource_id,omitempty"`
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // BackupResponse represents the response when creating a backup
@@ -62,6 +63,19 @@ func LoadSQLFile(db *sql.DB, sqlFile string) error {
 		}
 	}
 
+	return nil
+}
+
+// ClearTestDatabase clears all test tables to prepare for a fresh test
+func ClearTestDatabase(db *sql.DB) error {
+	// Order matters due to foreign key constraints - delete child tables first
+	tables := []string{"orders", "users"}
+	for _, table := range tables {
+		_, err := db.Exec(fmt.Sprintf("DELETE FROM %s", table))
+		if err != nil {
+			return fmt.Errorf("failed to clear table %s: %w", table, err)
+		}
+	}
 	return nil
 }
 

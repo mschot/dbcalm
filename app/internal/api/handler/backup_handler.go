@@ -2,15 +2,23 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/martijn/dbcalm/internal/api/dto"
+	"github.com/martijn/dbcalm/internal/api/util"
 	"github.com/martijn/dbcalm/internal/core/domain"
 	"github.com/martijn/dbcalm/internal/core/repository"
 	"github.com/martijn/dbcalm/internal/core/service"
+)
+
+// Allowed fields for backup queries and ordering
+var (
+	backupQueryFields = []string{"id", "from_backup_id", "schedule_id", "start_time", "end_time", "process_id"}
+	backupOrderFields = []string{"id", "start_time", "end_time"}
 )
 
 type BackupHandler struct {
@@ -47,11 +55,20 @@ func (h *BackupHandler) CreateBackup(c *gin.Context) {
 	}
 
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, dto.ErrorResponse{
-			Error:   "Service Unavailable",
-			Message: err.Error(),
-			Code:    http.StatusServiceUnavailable,
-		})
+		var svcErr *service.ServiceError
+		if errors.As(err, &svcErr) {
+			c.JSON(svcErr.Code, dto.ErrorResponse{
+				Error:   http.StatusText(svcErr.Code),
+				Message: svcErr.Message,
+				Code:    svcErr.Code,
+			})
+		} else {
+			c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+				Code:    http.StatusInternalServerError,
+			})
+		}
 		return
 	}
 
@@ -90,26 +107,65 @@ func (h *BackupHandler) GetBackup(c *gin.Context) {
 
 // ListBackups handles GET /backups
 func (h *BackupHandler) ListBackups(c *gin.Context) {
-	// Parse query parameters
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	// Parse pagination parameters
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "25"))
 
 	filter := repository.BackupFilter{
-		Limit:  limit,
-		Offset: offset,
+		ListFilter: util.ListFilter{
+			Page:    page,
+			PerPage: perPage,
+		},
 	}
 
-	// Optional filters
-	if scheduleID := c.Query("schedule_id"); scheduleID != "" {
-		id, err := strconv.ParseInt(scheduleID, 10, 64)
-		if err == nil {
-			filter.ScheduleID = &id
+	// Parse query filters
+	if queryStr := c.Query("query"); queryStr != "" {
+		filters, err := util.ParseQueryString(queryStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+				Code:    http.StatusBadRequest,
+			})
+			return
 		}
+
+		// Validate field names
+		if err := util.ValidateFilterFields(filters, backupQueryFields); err != nil {
+			c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+				Code:    http.StatusBadRequest,
+			})
+			return
+		}
+
+		filter.Filters = filters
 	}
 
-	if backupType := c.Query("type"); backupType != "" {
-		bType := domain.BackupType(backupType)
-		filter.Type = &bType
+	// Parse order
+	if orderStr := c.Query("order"); orderStr != "" {
+		orders, err := util.ParseOrderString(orderStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+				Code:    http.StatusBadRequest,
+			})
+			return
+		}
+
+		// Validate field names
+		if err := util.ValidateOrderFields(orders, backupOrderFields); err != nil {
+			c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+				Code:    http.StatusBadRequest,
+			})
+			return
+		}
+
+		filter.Order = orders
 	}
 
 	backups, err := h.backupService.ListBackups(c.Request.Context(), filter)
@@ -125,13 +181,9 @@ func (h *BackupHandler) ListBackups(c *gin.Context) {
 	count, _ := h.backupService.CountBackups(c.Request.Context(), filter)
 
 	// Calculate pagination info
-	page := 1
-	if limit > 0 {
-		page = (offset / limit) + 1
-	}
 	totalPages := 0
-	if limit > 0 {
-		totalPages = (count + limit - 1) / limit
+	if perPage > 0 {
+		totalPages = (count + perPage - 1) / perPage
 	}
 
 	response := dto.BackupListResponse{
@@ -139,7 +191,7 @@ func (h *BackupHandler) ListBackups(c *gin.Context) {
 		Pagination: dto.PaginationInfo{
 			Total:      count,
 			Page:       page,
-			PerPage:    limit,
+			PerPage:    perPage,
 			TotalPages: totalPages,
 		},
 	}

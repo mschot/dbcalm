@@ -74,6 +74,8 @@ func (r *processRepository) FindByCommandID(ctx context.Context, commandID strin
 		SELECT id, command_id, command, pid, status, output, error, return_code, start_time, end_time, type, args
 		FROM process
 		WHERE command_id = ?
+		ORDER BY id DESC
+		LIMIT 1
 	`
 	return r.scanProcess(r.db.QueryRowContext(ctx, query, commandID))
 }
@@ -121,34 +123,12 @@ func (r *processRepository) Update(ctx context.Context, process *domain.Process)
 }
 
 func (r *processRepository) List(ctx context.Context, filter repository.ProcessFilter) ([]*domain.Process, error) {
-	query := `
-		SELECT id, command_id, command, pid, status, output, error, return_code, start_time, end_time, type, args
-		FROM process
-		WHERE 1=1
-	`
+	query := `SELECT id, command_id, command, pid, status, output, error, return_code, start_time, end_time, type, args FROM process WHERE 1=1`
 	args := []interface{}{}
 
-	if filter.Type != nil {
-		query += " AND type = ?"
-		args = append(args, *filter.Type)
-	}
-
-	if filter.Status != nil {
-		query += " AND status = ?"
-		args = append(args, *filter.Status)
-	}
-
-	query += " ORDER BY start_time DESC"
-
-	if filter.Limit > 0 {
-		query += " LIMIT ?"
-		args = append(args, filter.Limit)
-	}
-
-	if filter.Offset > 0 {
-		query += " OFFSET ?"
-		args = append(args, filter.Offset)
-	}
+	query, args = ApplyFilters(query, args, filter.Filters)
+	query = ApplyOrdering(query, filter.Order, "start_time DESC")
+	query, args = ApplyPagination(query, args, filter.Page, filter.PerPage)
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -173,18 +153,10 @@ func (r *processRepository) List(ctx context.Context, filter repository.ProcessF
 }
 
 func (r *processRepository) Count(ctx context.Context, filter repository.ProcessFilter) (int, error) {
-	query := `SELECT COUNT(*) FROM processes WHERE 1=1`
+	query := `SELECT COUNT(*) FROM process WHERE 1=1`
 	args := []interface{}{}
 
-	if filter.Type != nil {
-		query += " AND type = ?"
-		args = append(args, *filter.Type)
-	}
-
-	if filter.Status != nil {
-		query += " AND status = ?"
-		args = append(args, *filter.Status)
-	}
+	query, args = ApplyFilters(query, args, filter.Filters)
 
 	var count int
 	err := r.db.QueryRowContext(ctx, query, args...).Scan(&count)

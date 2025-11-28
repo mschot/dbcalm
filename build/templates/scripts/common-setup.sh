@@ -1,16 +1,9 @@
 #!/bin/bash
 # Common post-installation setup script for both DEBIAN and RPM packages
 # This script runs AFTER files are extracted to set permissions and configure the system
+# Note: User/group creation is handled by preinstall.sh (runs before file extraction)
 
-project_name="${1:-dbcalm}"
-
-# Create dbcalm group if it doesn't exist
-getent group "$project_name" >/dev/null || groupadd -r "$project_name"
-
-# Create dbcalm user if it doesn't exist
-getent passwd "$project_name" >/dev/null || \
-    useradd -r -g "$project_name" -d "/var/lib/$project_name" -s /sbin/nologin \
-    -c "DBCalm service user" "$project_name"
+project_name="dbcalm"
 
 # Add mysql user to dbcalm group
 if id mysql >/dev/null 2>&1; then

@@ -1,4 +1,4 @@
-.PHONY: help dev kill build clean setup-runtime build-main build-db-cmd build-cmd e2e-build e2e-test e2e-test-debian-mariadb e2e-test-debian-mysql e2e-test-rocky-mariadb e2e-test-rocky-mysql e2e-clean package-deb package-rpm package-deb-docker package-rpm-docker package-both-docker package-clean install-deb install-rpm
+.PHONY: help dev kill build clean setup-runtime build-main build-db-cmd build-cmd sudo-auth e2e-build e2e-test e2e-test-debian-mariadb e2e-test-debian-mysql e2e-test-rocky-mariadb e2e-test-rocky-mysql e2e-test-debian-mariadb-quick e2e-test-debian-mysql-quick e2e-test-rocky-mariadb-quick e2e-test-rocky-mysql-quick e2e-test-parallel e2e-clean package-deb package-rpm package-deb-docker package-rpm-docker package-both-docker package-clean install-deb install-rpm
 
 # Enable Docker BuildKit for better caching and modern features
 export DOCKER_BUILDKIT=1
@@ -62,7 +62,10 @@ clean: ## Remove all built binaries
 	@rm -f cmd/dbcalm-db-cmd cmd/dbcalm-cmd
 	@echo "$(GREEN)✓ Clean complete$(NC)"
 
-dev: kill build setup-runtime ## Kill processes, rebuild all, and start services (cmd services in background, main app in foreground)
+sudo-auth: ## Pre-authenticate sudo to avoid password prompts during dev
+	@sudo -v
+
+dev: kill build sudo-auth setup-runtime ## Kill processes, rebuild all, and start services (cmd services in background, main app in foreground)
 	@echo ""
 	@echo "$(GREEN)========================================$(NC)"
 	@echo "$(GREEN)  Starting DBCalm Development Environment$(NC)"
@@ -89,14 +92,12 @@ dev: kill build setup-runtime ## Kill processes, rebuild all, and start services
 	@echo ""
 	@./app/bin/dbcalm --config app/config.dev.yml server
 
-e2e-build: build ## Build all binaries and prepare for E2E tests
+e2e-build: package-both-docker ## Build packages and prepare for E2E tests
 	@echo "$(YELLOW)Preparing E2E test artifacts...$(NC)"
 	@mkdir -p tests/e2e/artifacts tests/e2e/test-results
-	@cp app/bin/dbcalm tests/e2e/artifacts/
-	@cp cmd/dbcalm-db-cmd tests/e2e/artifacts/
-	@cp cmd/dbcalm-cmd tests/e2e/artifacts/
+	@cp build/dist/*.deb tests/e2e/artifacts/ 2>/dev/null || true
+	@cp build/dist/*.rpm tests/e2e/artifacts/ 2>/dev/null || true
 	@echo "$(GREEN)✓ E2E artifacts ready$(NC)"
-
 e2e-test-debian-mariadb: e2e-build ## Run E2E tests on Debian with MariaDB
 	@echo "$(GREEN)Running E2E tests: Debian + MariaDB$(NC)"
 	@cd tests/e2e/common && DISTRO_DIR=debian DISTRO=debian DB_TYPE=mariadb docker compose -p dbcalm-e2e-go-deb-mariadb up --build --force-recreate --abort-on-container-exit --exit-code-from test-runner
@@ -113,10 +114,27 @@ e2e-test-rocky-mysql: e2e-build ## Run E2E tests on Rocky Linux with MySQL
 	@echo "$(GREEN)Running E2E tests: Rocky + MySQL$(NC)"
 	@cd tests/e2e/common && DISTRO_DIR=rocky DISTRO=rocky DB_TYPE=mysql docker compose -p dbcalm-e2e-go-rocky-mysql up --build --force-recreate --abort-on-container-exit --exit-code-from test-runner
 
-e2e-test: e2e-test-debian-mariadb e2e-test-debian-mysql e2e-test-rocky-mariadb e2e-test-rocky-mysql ## Run all E2E tests (all OS/DB combinations)
-	@echo "$(GREEN)========================================$(NC)"
-	@echo "$(GREEN)  All E2E tests completed!$(NC)"
-	@echo "$(GREEN)========================================$(NC)"
+
+# Quick test targets (skip package build, assume packages already exist in tests/e2e/artifacts)
+e2e-test-debian-mariadb-quick: ## Run E2E tests on Debian with MariaDB (skip build)
+	@echo "$(GREEN)Running E2E tests: Debian + MariaDB (quick)$(NC)"
+	@cd tests/e2e/common && DISTRO_DIR=debian DISTRO=debian DB_TYPE=mariadb docker compose -p dbcalm-e2e-go-deb-mariadb up --build --force-recreate --abort-on-container-exit --exit-code-from test-runner
+
+e2e-test-debian-mysql-quick: ## Run E2E tests on Debian with MySQL (skip build)
+	@echo "$(GREEN)Running E2E tests: Debian + MySQL (quick)$(NC)"
+	@cd tests/e2e/common && DISTRO_DIR=debian DISTRO=debian DB_TYPE=mysql docker compose -p dbcalm-e2e-go-deb-mysql up --build --force-recreate --abort-on-container-exit --exit-code-from test-runner
+
+e2e-test-rocky-mariadb-quick: ## Run E2E tests on Rocky Linux with MariaDB (skip build)
+	@echo "$(GREEN)Running E2E tests: Rocky + MariaDB (quick)$(NC)"
+	@cd tests/e2e/common && DISTRO_DIR=rocky DISTRO=rocky DB_TYPE=mariadb docker compose -p dbcalm-e2e-go-rocky-mariadb up --build --force-recreate --abort-on-container-exit --exit-code-from test-runner
+
+e2e-test-rocky-mysql-quick: ## Run E2E tests on Rocky Linux with MySQL (skip build)
+	@echo "$(GREEN)Running E2E tests: Rocky + MySQL (quick)$(NC)"
+	@cd tests/e2e/common && DISTRO_DIR=rocky DISTRO=rocky DB_TYPE=mysql docker compose -p dbcalm-e2e-go-rocky-mysql up --build --force-recreate --abort-on-container-exit --exit-code-from test-runner
+
+e2e-test: ## Run all E2E tests in parallel (builds packages first, then runs all tests concurrently)
+	@echo "$(GREEN)Running all E2E tests in parallel...$(NC)"
+	@cd tests/e2e && go run run_all_tests.go
 
 e2e-clean: ## Clean up E2E test artifacts and Docker resources
 	@echo "$(YELLOW)Cleaning E2E test artifacts...$(NC)"

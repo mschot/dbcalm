@@ -7,9 +7,16 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/martijn/dbcalm/internal/api/dto"
+	"github.com/martijn/dbcalm/internal/api/util"
 	"github.com/martijn/dbcalm/internal/core/domain"
 	"github.com/martijn/dbcalm/internal/core/repository"
 	"github.com/martijn/dbcalm/internal/core/service"
+)
+
+// Allowed fields for process queries and ordering
+var (
+	processQueryFields = []string{"id", "command", "command_id", "pid", "status", "return_code", "start_time", "end_time", "type"}
+	processOrderFields = []string{"id", "start_time", "end_time", "status"}
 )
 
 type ProcessHandler struct {
@@ -24,23 +31,65 @@ func NewProcessHandler(processService *service.ProcessService) *ProcessHandler {
 
 // ListProcesses handles GET /processes
 func (h *ProcessHandler) ListProcesses(c *gin.Context) {
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	// Parse pagination parameters
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "25"))
 
 	filter := repository.ProcessFilter{
-		Limit:  limit,
-		Offset: offset,
+		ListFilter: util.ListFilter{
+			Page:    page,
+			PerPage: perPage,
+		},
 	}
 
-	// Optional filters
-	if processType := c.Query("type"); processType != "" {
-		pt := domain.ProcessType(processType)
-		filter.Type = &pt
+	// Parse query filters
+	if queryStr := c.Query("query"); queryStr != "" {
+		filters, err := util.ParseQueryString(queryStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+				Code:    http.StatusBadRequest,
+			})
+			return
+		}
+
+		// Validate field names
+		if err := util.ValidateFilterFields(filters, processQueryFields); err != nil {
+			c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+				Code:    http.StatusBadRequest,
+			})
+			return
+		}
+
+		filter.Filters = filters
 	}
 
-	if status := c.Query("status"); status != "" {
-		s := domain.ProcessStatus(status)
-		filter.Status = &s
+	// Parse order
+	if orderStr := c.Query("order"); orderStr != "" {
+		orders, err := util.ParseOrderString(orderStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+				Code:    http.StatusBadRequest,
+			})
+			return
+		}
+
+		// Validate field names
+		if err := util.ValidateOrderFields(orders, processOrderFields); err != nil {
+			c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+				Code:    http.StatusBadRequest,
+			})
+			return
+		}
+
+		filter.Order = orders
 	}
 
 	processes, err := h.processService.ListProcesses(c.Request.Context(), filter)
@@ -56,13 +105,9 @@ func (h *ProcessHandler) ListProcesses(c *gin.Context) {
 	count, _ := h.processService.CountProcesses(c.Request.Context(), filter)
 
 	// Calculate pagination info
-	page := 1
-	if limit > 0 {
-		page = (offset / limit) + 1
-	}
 	totalPages := 0
-	if limit > 0 {
-		totalPages = (count + limit - 1) / limit
+	if perPage > 0 {
+		totalPages = (count + perPage - 1) / perPage
 	}
 
 	response := dto.ProcessListResponse{
@@ -70,7 +115,7 @@ func (h *ProcessHandler) ListProcesses(c *gin.Context) {
 		Pagination: dto.PaginationInfo{
 			Total:      count,
 			Page:       page,
-			PerPage:    limit,
+			PerPage:    perPage,
 			TotalPages: totalPages,
 		},
 	}
@@ -143,6 +188,13 @@ func toProcessResponse(process *domain.Process) dto.ProcessResponse {
 	// Add status link
 	link := fmt.Sprintf("/status/%s", process.CommandID)
 	response.Link = &link
+
+	// Extract resource_id from args if available (for backup/restore operations)
+	if process.Args != nil {
+		if id, ok := process.Args["id"].(string); ok {
+			response.ResourceID = &id
+		}
+	}
 
 	return response
 }

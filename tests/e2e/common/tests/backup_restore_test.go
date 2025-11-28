@@ -80,6 +80,11 @@ func TestFullBackupCreation(t *testing.T) {
 	db := getDBConnection(t)
 	defer db.Close()
 
+	// Clear database before loading fixtures
+	if err := utils.ClearTestDatabase(db); err != nil {
+		t.Fatalf("Failed to clear test database: %v", err)
+	}
+
 	// Load initial dataset
 	if err := utils.LoadSQLFile(db, "fixtures/initial_data.sql"); err != nil {
 		t.Fatalf("Failed to load initial data: %v", err)
@@ -130,8 +135,8 @@ func TestFullBackupCreation(t *testing.T) {
 	}
 
 	// Get the actual backup ID from the process status
-	backupID, ok := processStatus.Metadata["resource_id"].(string)
-	if !ok || backupID == "" {
+	backupID := processStatus.ResourceID
+	if backupID == "" {
 		t.Fatal("Backup ID not found in process status")
 	}
 
@@ -157,6 +162,18 @@ func TestFullRestore(t *testing.T) {
 	db := getDBConnection(t)
 	dbService := getDBService()
 
+	// Ensure database is restarted even if test fails
+	defer func() {
+		if !dbService.IsRunning() {
+			dbService.Start()
+		}
+	}()
+
+	// Clear database before loading fixtures
+	if err := utils.ClearTestDatabase(db); err != nil {
+		t.Fatalf("Failed to clear test database: %v", err)
+	}
+
 	// Load initial dataset and create backup
 	if err := utils.LoadSQLFile(db, "fixtures/initial_data.sql"); err != nil {
 		t.Fatalf("Failed to load initial data: %v", err)
@@ -172,8 +189,8 @@ func TestFullRestore(t *testing.T) {
 		t.Fatalf("Backup failed: %v", err)
 	}
 
-	backupID, ok := processStatus.Metadata["resource_id"].(string)
-	if !ok || backupID == "" {
+	backupID := processStatus.ResourceID
+	if backupID == "" {
 		t.Fatal("Backup ID not found in process status")
 	}
 
@@ -268,6 +285,11 @@ func TestIncrementalBackupCreation(t *testing.T) {
 	db := getDBConnection(t)
 	defer db.Close()
 
+	// Clear database before loading fixtures
+	if err := utils.ClearTestDatabase(db); err != nil {
+		t.Fatalf("Failed to clear test database: %v", err)
+	}
+
 	// Load initial dataset and create full backup
 	if err := utils.LoadSQLFile(db, "fixtures/initial_data.sql"); err != nil {
 		t.Fatalf("Failed to load initial data: %v", err)
@@ -283,8 +305,8 @@ func TestIncrementalBackupCreation(t *testing.T) {
 		t.Fatalf("Full backup failed: %v", err)
 	}
 
-	fullBackupID, ok := fullProcessStatus.Metadata["resource_id"].(string)
-	if !ok || fullBackupID == "" {
+	fullBackupID := fullProcessStatus.ResourceID
+	if fullBackupID == "" {
 		t.Fatal("Full backup ID not found in process status")
 	}
 
@@ -340,8 +362,8 @@ func TestIncrementalBackupCreation(t *testing.T) {
 		t.Fatalf("Incremental backup failed: %v", err)
 	}
 
-	incrementalBackupID, ok := processStatus.Metadata["resource_id"].(string)
-	if !ok || incrementalBackupID == "" {
+	incrementalBackupID := processStatus.ResourceID
+	if incrementalBackupID == "" {
 		t.Fatal("Incremental backup ID not found in process status")
 	}
 
@@ -359,6 +381,18 @@ func TestIncrementalRestore(t *testing.T) {
 	db := getDBConnection(t)
 	dbService := getDBService()
 
+	// Ensure database is restarted even if test fails
+	defer func() {
+		if !dbService.IsRunning() {
+			dbService.Start()
+		}
+	}()
+
+	// Clear database before loading fixtures
+	if err := utils.ClearTestDatabase(db); err != nil {
+		t.Fatalf("Failed to clear test database: %v", err)
+	}
+
 	// Load initial dataset and create full backup
 	if err := utils.LoadSQLFile(db, "fixtures/initial_data.sql"); err != nil {
 		t.Fatalf("Failed to load initial data: %v", err)
@@ -374,8 +408,8 @@ func TestIncrementalRestore(t *testing.T) {
 		t.Fatalf("Full backup failed: %v", err)
 	}
 
-	fullBackupID, ok := fullProcessStatus.Metadata["resource_id"].(string)
-	if !ok || fullBackupID == "" {
+	fullBackupID := fullProcessStatus.ResourceID
+	if fullBackupID == "" {
 		t.Fatal("Full backup ID not found in process status")
 	}
 
@@ -394,8 +428,8 @@ func TestIncrementalRestore(t *testing.T) {
 		t.Fatalf("Incremental backup failed: %v", err)
 	}
 
-	incrementalBackupID, ok := incrProcessStatus.Metadata["resource_id"].(string)
-	if !ok || incrementalBackupID == "" {
+	incrementalBackupID := incrProcessStatus.ResourceID
+	if incrementalBackupID == "" {
 		t.Fatal("Incremental backup ID not found in process status")
 	}
 
@@ -490,9 +524,12 @@ func TestBackupRequiresCredentialsFile(t *testing.T) {
 	}
 
 	defer func() {
-		// Restore credentials file
+		// Restore credentials file - ensure this runs before test returns
+		// Use mode 0644 so mysql user can read it (dbcalm-db-cmd runs as mysql)
 		if originalContent != nil {
-			os.WriteFile(credentialsFile, originalContent, 0600)
+			if err := os.WriteFile(credentialsFile, originalContent, 0644); err != nil {
+				t.Errorf("Failed to restore credentials file: %v", err)
+			}
 		}
 	}()
 
@@ -538,11 +575,17 @@ func TestBackupRequiresClientDBCalmSection(t *testing.T) {
 	}
 
 	// Write credentials file without [client-dbcalm] section
-	os.WriteFile(credentialsFile, []byte("[client]\nuser=test\npassword=test\n"), 0600)
+	// Use mode 0644 so mysql user can read it (dbcalm-db-cmd runs as mysql)
+	if err := os.WriteFile(credentialsFile, []byte("[client]\nuser=test\npassword=test\n"), 0644); err != nil {
+		t.Fatalf("Failed to modify credentials file: %v", err)
+	}
 
 	defer func() {
-		// Restore original credentials
-		os.WriteFile(credentialsFile, originalContent, 0600)
+		// Restore original credentials - ensure this runs before test returns
+		// Use mode 0644 so mysql user can read it (dbcalm-db-cmd runs as mysql)
+		if err := os.WriteFile(credentialsFile, originalContent, 0644); err != nil {
+			t.Errorf("Failed to restore credentials file: %v", err)
+		}
 	}()
 
 	// Attempt backup - should fail with 503
@@ -583,6 +626,11 @@ func TestRestoreRequiresServerStopped(t *testing.T) {
 	defer db.Close()
 	dbService := getDBService()
 
+	// Clear database before loading fixtures
+	if err := utils.ClearTestDatabase(db); err != nil {
+		t.Fatalf("Failed to clear test database: %v", err)
+	}
+
 	// Create a backup to restore from
 	if err := utils.LoadSQLFile(db, "fixtures/initial_data.sql"); err != nil {
 		t.Fatalf("Failed to load initial data: %v", err)
@@ -598,8 +646,8 @@ func TestRestoreRequiresServerStopped(t *testing.T) {
 		t.Fatalf("Backup failed: %v", err)
 	}
 
-	backupID, ok := processStatus.Metadata["resource_id"].(string)
-	if !ok || backupID == "" {
+	backupID := processStatus.ResourceID
+	if backupID == "" {
 		t.Fatal("Backup ID not found in process status")
 	}
 
@@ -649,6 +697,18 @@ func TestRestoreRequiresEmptyDataDirectory(t *testing.T) {
 	db := getDBConnection(t)
 	dbService := getDBService()
 
+	// Ensure database is restarted even if test fails
+	defer func() {
+		if !dbService.IsRunning() {
+			dbService.Start()
+		}
+	}()
+
+	// Clear database before loading fixtures
+	if err := utils.ClearTestDatabase(db); err != nil {
+		t.Fatalf("Failed to clear test database: %v", err)
+	}
+
 	// Create a backup to restore from
 	if err := utils.LoadSQLFile(db, "fixtures/initial_data.sql"); err != nil {
 		t.Fatalf("Failed to load initial data: %v", err)
@@ -664,8 +724,8 @@ func TestRestoreRequiresEmptyDataDirectory(t *testing.T) {
 		t.Fatalf("Backup failed: %v", err)
 	}
 
-	backupID, ok := processStatus.Metadata["resource_id"].(string)
-	if !ok || backupID == "" {
+	backupID := processStatus.ResourceID
+	if backupID == "" {
 		t.Fatal("Backup ID not found in process status")
 	}
 
@@ -718,6 +778,11 @@ func TestListBackups(t *testing.T) {
 	db := getDBConnection(t)
 	defer db.Close()
 
+	// Clear database before loading fixtures
+	if err := utils.ClearTestDatabase(db); err != nil {
+		t.Fatalf("Failed to clear test database: %v", err)
+	}
+
 	// Create multiple backups
 	if err := utils.LoadSQLFile(db, "fixtures/initial_data.sql"); err != nil {
 		t.Fatalf("Failed to load initial data: %v", err)
@@ -735,8 +800,8 @@ func TestListBackups(t *testing.T) {
 			t.Fatalf("Backup failed: %v", err)
 		}
 
-		backupID, ok := processStatus.Metadata["resource_id"].(string)
-		if ok && backupID != "" {
+		backupID := processStatus.ResourceID
+		if backupID != "" {
 			backupIDs = append(backupIDs, backupID)
 		}
 	}
@@ -796,6 +861,11 @@ func TestGetBackupDetails(t *testing.T) {
 	db := getDBConnection(t)
 	defer db.Close()
 
+	// Clear database before loading fixtures
+	if err := utils.ClearTestDatabase(db); err != nil {
+		t.Fatalf("Failed to clear test database: %v", err)
+	}
+
 	// Create a backup
 	if err := utils.LoadSQLFile(db, "fixtures/initial_data.sql"); err != nil {
 		t.Fatalf("Failed to load initial data: %v", err)
@@ -811,8 +881,8 @@ func TestGetBackupDetails(t *testing.T) {
 		t.Fatalf("Backup failed: %v", err)
 	}
 
-	backupID, ok := processStatus.Metadata["resource_id"].(string)
-	if !ok || backupID == "" {
+	backupID := processStatus.ResourceID
+	if backupID == "" {
 		t.Fatal("Backup ID not found in process status")
 	}
 

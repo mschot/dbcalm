@@ -7,80 +7,37 @@ echo "=== Setting up DBCalm for E2E tests ==="
 DISTRO=${DISTRO:-debian}
 echo "Distribution: $DISTRO"
 
-# For Go version, copy binaries from mounted artifacts directory
-echo "Installing DBCalm binaries from /tests/artifacts/..."
-if [ ! -f "/tests/artifacts/dbcalm" ] || [ ! -f "/tests/artifacts/dbcalm-db-cmd" ] || [ ! -f "/tests/artifacts/dbcalm-cmd" ]; then
-    echo "ERROR: Required binaries not found in /tests/artifacts/"
-    ls -la /tests/artifacts/
+# Find and install the package based on distro
+if [ "$DISTRO" = "debian" ]; then
+    PACKAGE_FILE=$(ls /tests/artifacts/*.deb 2>/dev/null | head -1)
+    if [ -z "$PACKAGE_FILE" ]; then
+        echo "ERROR: No .deb package found in /tests/artifacts/"
+        exit 1
+    fi
+    echo "Installing DBCalm from $PACKAGE_FILE..."
+    dpkg -i "$PACKAGE_FILE" || apt-get install -f -y
+elif [ "$DISTRO" = "rocky" ]; then
+    PACKAGE_FILE=$(ls /tests/artifacts/*.rpm 2>/dev/null | head -1)
+    if [ -z "$PACKAGE_FILE" ]; then
+        echo "ERROR: No .rpm package found in /tests/artifacts/"
+        exit 1
+    fi
+    echo "Installing DBCalm from $PACKAGE_FILE..."
+    dnf install -y "$PACKAGE_FILE" || yum install -y "$PACKAGE_FILE"
+else
+    echo "ERROR: Unsupported distro: $DISTRO"
     exit 1
 fi
 
-# Copy binaries to /usr/bin
-cp /tests/artifacts/dbcalm /usr/bin/dbcalm
-cp /tests/artifacts/dbcalm-db-cmd /usr/bin/dbcalm-db-cmd
-cp /tests/artifacts/dbcalm-cmd /usr/bin/dbcalm-cmd
-
-# Make them executable
-chmod +x /usr/bin/dbcalm
-chmod +x /usr/bin/dbcalm-db-cmd
-chmod +x /usr/bin/dbcalm-cmd
-
-echo "Binaries installed successfully"
-
-# Create necessary directories and users
-echo "Creating DBCalm directories and users..."
-mkdir -p /etc/dbcalm
-mkdir -p /var/lib/dbcalm
-mkdir -p /var/log/dbcalm
-mkdir -p /var/run/dbcalm
-mkdir -p /var/backups/dbcalm
-
-# Create dbcalm user and group if they don't exist
-if ! id -u dbcalm >/dev/null 2>&1; then
-    useradd -r -s /bin/false dbcalm
-fi
-
-# Set up permissions
-chown -R mysql:mysql /var/run/dbcalm
-chown -R dbcalm:dbcalm /var/lib/dbcalm
-chown -R dbcalm:dbcalm /var/log/dbcalm
-chmod 755 /var/lib/dbcalm
-chmod 755 /var/log/dbcalm
+# Re-run post-install setup to fix permissions
+# (needed because volume mounts may overlay files created during package install)
+echo "Running post-install setup to fix permissions..."
+/usr/share/dbcalm/scripts/common-setup.sh dbcalm
 
 # Configure db_type based on DB_TYPE environment variable
 DB_TYPE=${DB_TYPE:-mariadb}
 echo "Configuring DBCalm for database type: $DB_TYPE..."
-
-# Create basic config file
-cat > /etc/dbcalm/config.yml <<EOF
-db_type: $DB_TYPE
-backup_dir: /var/backups/dbcalm
-db_socket: /var/run/dbcalm/dbcalm-db.sock
-cmd_socket: /var/run/dbcalm/dbcalm-cmd.sock
-database_path: /var/lib/dbcalm/db.sqlite3
-log_file: /var/log/dbcalm/dbcalm.log
-tls:
-  enabled: true
-  cert_file: /etc/dbcalm/cert.pem
-  key_file: /etc/dbcalm/key.pem
-server:
-  host: 0.0.0.0
-  port: 8335
-EOF
-
-# Generate self-signed certificate for HTTPS
-echo "Generating self-signed TLS certificate..."
-openssl req -x509 -newkey rsa:4096 -nodes -keyout /etc/dbcalm/key.pem -out /etc/dbcalm/cert.pem -days 365 -subj "/CN=localhost" 2>/dev/null
-chmod 600 /etc/dbcalm/key.pem
-chown dbcalm:dbcalm /etc/dbcalm/key.pem /etc/dbcalm/cert.pem
-
-# Create credentials file for xtrabackup
-cat > /etc/dbcalm/credentials.cnf <<EOF
-[client-dbcalm]
-user=root
-password=
-EOF
-chmod 600 /etc/dbcalm/credentials.cnf
+sed -i "s/^db_type:.*/db_type: $DB_TYPE/" /etc/dbcalm/config.yml
 
 # Start DBCalm services manually (no systemd in container)
 echo "Starting DBCalm services..."
@@ -133,7 +90,7 @@ if [ -z "$client_id" ] || [ -z "$client_secret" ]; then
     exit 1
 fi
 
-# Save credentials to file for pytest
+# Save credentials to file for Go tests
 echo "E2E_CLIENT_ID=$client_id" > /tmp/e2e_credentials.env
 echo "E2E_CLIENT_SECRET=$client_secret" >> /tmp/e2e_credentials.env
 
@@ -147,10 +104,12 @@ echo "Credentials saved to: /tmp/e2e_credentials.env"
 
 # Verify services are running (check processes instead of systemctl)
 echo "Verifying DBCalm services..."
-ps aux | grep -E "(dbcalm|dbcalm-cmd|dbcalm-mariadb-cmd)" | grep -v grep || echo "Warning: Some services may not be running"
+ps aux | grep -E "(dbcalm|dbcalm-cmd|dbcalm-db-cmd)" | grep -v grep || echo "Warning: Some services may not be running"
 
 # Verify command sockets
 echo ""
 # Ensure verify_sockets.sh is executable
 chmod +x /tests/scripts/verify_sockets.sh 2>/dev/null || true
-/tests/scripts/verify_sockets.sh
+if [ -f /tests/scripts/verify_sockets.sh ]; then
+    /tests/scripts/verify_sockets.sh
+fi

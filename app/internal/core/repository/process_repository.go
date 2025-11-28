@@ -3,14 +3,13 @@ package repository
 import (
 	"context"
 
+	"github.com/martijn/dbcalm/internal/api/util"
 	"github.com/martijn/dbcalm/internal/core/domain"
 )
 
+// ProcessFilter embeds ListFilter for generic query/order/pagination
 type ProcessFilter struct {
-	Type   *domain.ProcessType
-	Status *domain.ProcessStatus
-	Limit  int
-	Offset int
+	util.ListFilter
 }
 
 type ProcessRepository interface {

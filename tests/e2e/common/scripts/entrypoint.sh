@@ -98,8 +98,8 @@ if [ -f /tmp/e2e_credentials.env ]; then
     # Generate API token for tests
     echo "Generating API token..."
     TOKEN_RESPONSE=$(curl -k -s -X POST https://localhost:8335/auth/token \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "grant_type=client_credentials&client_id=$E2E_CLIENT_ID&client_secret=$E2E_CLIENT_SECRET")
+        -H "Content-Type: application/json" \
+        -d '{"grant_type":"client_credentials","client_id":"'"$E2E_CLIENT_ID"'","client_secret":"'"$E2E_CLIENT_SECRET"'"}')
 
     API_TOKEN=$(echo "$TOKEN_RESPONSE" | grep -o '"access_token":"[^"]*' | cut -d'"' -f4)
 
@@ -117,10 +117,12 @@ else
     exit 1
 fi
 
-# Change to test directory
-cd /tests/tests
+# Download Go dependencies
+cd /tests
+go mod download
 
-# Run tests with Go
+# Change to test directory and run tests
+cd /tests/tests
 echo "=== Running Go tests ==="
 go test -v -timeout 30m . 2>&1 | tee /tests/test-results/test-output.log
 

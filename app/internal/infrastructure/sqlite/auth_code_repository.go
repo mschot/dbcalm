@@ -26,7 +26,7 @@ func (r *authCodeRepository) Create(ctx context.Context, authCode *domain.AuthCo
 	}
 
 	query := `
-		INSERT INTO auth_codes (code, username, scopes, expires_at, created_at)
+		INSERT INTO auth_code (code, username, scopes, expires_at, created_at)
 		VALUES (?, ?, ?, ?, ?)
 	`
 	_, err = r.db.ExecContext(ctx, query,
@@ -45,7 +45,7 @@ func (r *authCodeRepository) Create(ctx context.Context, authCode *domain.AuthCo
 func (r *authCodeRepository) FindByCode(ctx context.Context, code string) (*domain.AuthCode, error) {
 	query := `
 		SELECT code, username, scopes, expires_at, created_at
-		FROM auth_codes
+		FROM auth_code
 		WHERE code = ?
 	`
 	var authCode domain.AuthCode
@@ -72,7 +72,7 @@ func (r *authCodeRepository) FindByCode(ctx context.Context, code string) (*doma
 }
 
 func (r *authCodeRepository) Delete(ctx context.Context, code string) error {
-	query := `DELETE FROM auth_codes WHERE code = ?`
+	query := `DELETE FROM auth_code WHERE code = ?`
 	result, err := r.db.ExecContext(ctx, query, code)
 	if err != nil {
 		return fmt.Errorf("failed to delete auth code: %w", err)
@@ -90,7 +90,7 @@ func (r *authCodeRepository) Delete(ctx context.Context, code string) error {
 }
 
 func (r *authCodeRepository) DeleteExpired(ctx context.Context) error {
-	query := `DELETE FROM auth_codes WHERE expires_at < ?`
+	query := `DELETE FROM auth_code WHERE expires_at < ?`
 	_, err := r.db.ExecContext(ctx, query, time.Now())
 	if err != nil {
 		return fmt.Errorf("failed to delete expired auth codes: %w", err)

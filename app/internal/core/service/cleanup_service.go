@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -48,106 +49,103 @@ func (s *CleanupService) CleanupBySchedule(ctx context.Context, scheduleID int64
 		return nil, fmt.Errorf("schedule does not have a retention policy")
 	}
 
-	// Create process record
-	args := map[string]interface{}{
-		"schedule_id": scheduleID,
-	}
-
-	process, err := s.processServ.CreateProcess(ctx,
-		fmt.Sprintf("cleanup --schedule-id %d", scheduleID),
-		domain.ProcessTypeCleanupBackups,
-		args,
-	)
+	// Get expired backups for this schedule (synchronously)
+	expiredBackups, err := s.getExpiredBackupsForSchedule(ctx, schedule)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get expired backups: %w", err)
 	}
 
-	// Execute cleanup asynchronously
-	go func() {
-		bgCtx := context.Background()
+	// Build lists for cleanup via socket service
+	var backupIDs []string
+	var folders []string
+	for _, backup := range expiredBackups {
+		backupIDs = append(backupIDs, backup.ID)
+		folders = append(folders, filepath.Join(s.backupDir, backup.ID))
+	}
 
-		// Get expired backups for this schedule
-		expiredBackups, err := s.getExpiredBackupsForSchedule(bgCtx, schedule)
-		if err != nil {
-			process.Fail(fmt.Sprintf("Failed to get expired backups: %v", err))
-			_ = s.processServ.processRepo.Update(bgCtx, process)
-			return
-		}
+	// Call cleanup via socket service (it will create the process)
+	// Even if no backups to delete, cmd service will create a process that succeeds immediately
+	cleanupArgs := map[string]interface{}{
+		"backup_ids": backupIDs,
+		"folders":    folders,
+	}
+	response, err := s.cmdClient.SendCommand(ctx, "cleanup_backups", cleanupArgs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initiate cleanup: %w", err)
+	}
+	if response.Code != 202 {
+		return nil, fmt.Errorf("cleanup failed: %s", response.Status)
+	}
 
-		// Delete backups
-		output, deleteErr := s.deleteBackups(bgCtx, expiredBackups)
-		if deleteErr != nil {
-			process.Fail(fmt.Sprintf("Cleanup partially failed: %v\nOutput: %s", deleteErr, output))
-		} else {
-			process.Complete(0, output, "")
-		}
+	// Start background goroutine to wait for completion and delete DB records
+	if len(expiredBackups) > 0 {
+		go s.waitAndDeleteRecords(response.ID, expiredBackups)
+	}
 
-		_ = s.processServ.processRepo.Update(bgCtx, process)
-	}()
-
-	return process, nil
+	// Return process stub - actual process was created by socket service
+	return &domain.Process{
+		CommandID: response.ID,
+		Status:    domain.ProcessStatusRunning,
+	}, nil
 }
 
 // CleanupAll runs cleanup for all schedules with retention policies
 func (s *CleanupService) CleanupAll(ctx context.Context) (*domain.Process, error) {
-	// Create process record
-	args := map[string]interface{}{
-		"all_schedules": true,
-	}
-
-	process, err := s.processServ.CreateProcess(ctx,
-		"cleanup --all",
-		domain.ProcessTypeCleanupBackups,
-		args,
-	)
+	// Get all schedules (synchronously)
+	schedules, err := s.scheduleRepo.List(ctx, repository.ScheduleFilter{})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get schedules: %w", err)
 	}
 
-	// Execute cleanup asynchronously
-	go func() {
-		bgCtx := context.Background()
+	var allExpiredBackups []*domain.Backup
 
-		// Get all schedules
-		schedules, err := s.scheduleRepo.List(bgCtx, repository.ScheduleFilter{})
+	// Get expired backups for each schedule with retention policy
+	for _, schedule := range schedules {
+		if schedule.RetentionValue == nil || schedule.RetentionUnit == nil {
+			continue
+		}
+
+		expiredBackups, err := s.getExpiredBackupsForSchedule(ctx, schedule)
 		if err != nil {
-			process.Fail(fmt.Sprintf("Failed to get schedules: %v", err))
-			_ = s.processServ.processRepo.Update(bgCtx, process)
-			return
+			// Log warning but continue with other schedules
+			continue
 		}
 
-		var allExpiredBackups []*domain.Backup
-		var output string
+		allExpiredBackups = append(allExpiredBackups, expiredBackups...)
+	}
 
-		// Get expired backups for each schedule with retention policy
-		for _, schedule := range schedules {
-			if schedule.RetentionValue == nil || schedule.RetentionUnit == nil {
-				continue
-			}
+	// Build lists for cleanup via socket service
+	var backupIDs []string
+	var folders []string
+	for _, backup := range allExpiredBackups {
+		backupIDs = append(backupIDs, backup.ID)
+		folders = append(folders, filepath.Join(s.backupDir, backup.ID))
+	}
 
-			expiredBackups, err := s.getExpiredBackupsForSchedule(bgCtx, schedule)
-			if err != nil {
-				output += fmt.Sprintf("Warning: Failed to get expired backups for schedule %d: %v\n", schedule.ID, err)
-				continue
-			}
+	// Call cleanup via socket service (it will create the process)
+	// Even if no backups to delete, cmd service will create a process that succeeds immediately
+	cleanupArgs := map[string]interface{}{
+		"backup_ids": backupIDs,
+		"folders":    folders,
+	}
+	response, err := s.cmdClient.SendCommand(ctx, "cleanup_backups", cleanupArgs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initiate cleanup: %w", err)
+	}
+	if response.Code != 202 {
+		return nil, fmt.Errorf("cleanup failed: %s", response.Status)
+	}
 
-			allExpiredBackups = append(allExpiredBackups, expiredBackups...)
-		}
+	// Start background goroutine to wait for completion and delete DB records
+	if len(allExpiredBackups) > 0 {
+		go s.waitAndDeleteRecords(response.ID, allExpiredBackups)
+	}
 
-		// Delete backups
-		deleteOutput, deleteErr := s.deleteBackups(bgCtx, allExpiredBackups)
-		output += deleteOutput
-
-		if deleteErr != nil {
-			process.Fail(fmt.Sprintf("Cleanup partially failed: %v\nOutput: %s", deleteErr, output))
-		} else {
-			process.Complete(0, output, "")
-		}
-
-		_ = s.processServ.processRepo.Update(bgCtx, process)
-	}()
-
-	return process, nil
+	// Return process stub - actual process was created by socket service
+	return &domain.Process{
+		CommandID: response.ID,
+		Status:    domain.ProcessStatusRunning,
+	}, nil
 }
 
 // getExpiredBackupsForSchedule gets all expired backups for a schedule
@@ -263,57 +261,35 @@ func (s *CleanupService) isInChain(backup *domain.Backup, rootID string, backupM
 	}
 }
 
-// deleteBackups deletes a list of backups
-func (s *CleanupService) deleteBackups(ctx context.Context, backups []*domain.Backup) (string, error) {
-	if len(backups) == 0 {
-		return "No backups to delete", nil
-	}
+// waitAndDeleteRecords waits for the cmd service process to complete, then deletes DB records
+func (s *CleanupService) waitAndDeleteRecords(commandID string, backups []*domain.Backup) {
+	ctx := context.Background()
 
-	var output string
-	output += fmt.Sprintf("Deleting %d backup(s)...\n", len(backups))
-
-	// Build lists for cleanup via socket service
-	var backupIDs []string
-	var folders []string
-	for _, backup := range backups {
-		backupIDs = append(backupIDs, backup.ID)
-		folders = append(folders, filepath.Join(s.backupDir, backup.ID))
-	}
-
-	// Call cleanup via socket service (matches Python architecture)
-	cleanupArgs := map[string]interface{}{
-		"backup_ids": backupIDs,
-		"folders":    folders,
-	}
-	response, err := s.cmdClient.SendCommand(ctx, "cleanup_backups", cleanupArgs)
-	if err != nil {
-		return output, fmt.Errorf("failed to cleanup backups via socket service: %w", err)
-	}
-	if response.Code != 200 && response.Code != 202 {
-		return output, fmt.Errorf("cleanup backups failed: %s", response.Status)
-	}
-
-	// Delete database records for all backups
-	successCount := 0
-	failCount := 0
-
-	for _, backup := range backups {
-		// Delete from database
-		if err := s.backupRepo.Delete(ctx, backup.ID); err != nil {
-			output += fmt.Sprintf("Warning: Failed to delete database record for %s: %v\n", backup.ID, err)
-			failCount++
+	// Poll for cmd service process completion
+	for {
+		proc, err := s.processServ.GetProcessByCommandID(ctx, commandID)
+		if err != nil {
+			// Process not found yet, keep waiting
+			time.Sleep(500 * time.Millisecond)
 			continue
 		}
-
-		output += fmt.Sprintf("Successfully deleted backup %s\n", backup.ID)
-		successCount++
+		if proc.Status == domain.ProcessStatusSuccess || proc.Status == domain.ProcessStatusFailed {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
 
-	output += fmt.Sprintf("\nSummary: %d deleted, %d failed\n", successCount, failCount)
-
-	if failCount > 0 {
-		return output, fmt.Errorf("%d backup(s) failed to delete", failCount)
+	// Delete records for folders that are gone
+	var idsToDelete []string
+	for _, backup := range backups {
+		folderPath := filepath.Join(s.backupDir, backup.ID)
+		if _, err := os.Stat(folderPath); os.IsNotExist(err) {
+			idsToDelete = append(idsToDelete, backup.ID)
+		}
 	}
 
-	return output, nil
+	// Delete all records in one query (avoids CASCADE race condition)
+	if len(idsToDelete) > 0 {
+		_ = s.backupRepo.DeleteMany(ctx, idsToDelete)
+	}
 }

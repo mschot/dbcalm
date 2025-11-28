@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/martijn/dbcalm/shared/database"
 )
 
 type Restore struct {
@@ -28,11 +28,7 @@ func NewRestoreRepository(dbPath string) *RestoreRepository {
 }
 
 func (r *RestoreRepository) getDB() (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", r.dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-	return db, nil
+	return database.OpenDB(r.dbPath)
 }
 
 func (r *RestoreRepository) Create(restore *Restore) error {

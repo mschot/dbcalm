@@ -1,15 +1,23 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/martijn/dbcalm/internal/api/dto"
+	"github.com/martijn/dbcalm/internal/api/util"
 	"github.com/martijn/dbcalm/internal/core/domain"
 	"github.com/martijn/dbcalm/internal/core/repository"
 	"github.com/martijn/dbcalm/internal/core/service"
+)
+
+// Allowed fields for restore queries and ordering
+var (
+	restoreQueryFields = []string{"id", "start_time", "end_time", "target", "target_path", "backup_id", "backup_timestamp", "process_id"}
+	restoreOrderFields = []string{"id", "start_time", "end_time", "backup_id"}
 )
 
 type RestoreHandler struct {
@@ -56,11 +64,20 @@ func (h *RestoreHandler) CreateRestore(c *gin.Context) {
 	}
 
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, dto.ErrorResponse{
-			Error:   "Service Unavailable",
-			Message: err.Error(),
-			Code:    http.StatusServiceUnavailable,
-		})
+		var svcErr *service.ServiceError
+		if errors.As(err, &svcErr) {
+			c.JSON(svcErr.Code, dto.ErrorResponse{
+				Error:   http.StatusText(svcErr.Code),
+				Message: svcErr.Message,
+				Code:    svcErr.Code,
+			})
+		} else {
+			c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+				Code:    http.StatusInternalServerError,
+			})
+		}
 		return
 	}
 
@@ -78,23 +95,65 @@ func (h *RestoreHandler) CreateRestore(c *gin.Context) {
 
 // ListRestores handles GET /restores
 func (h *RestoreHandler) ListRestores(c *gin.Context) {
-	// Parse query parameters
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	// Parse pagination parameters
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "25"))
 
 	filter := repository.RestoreFilter{
-		Limit:  limit,
-		Offset: offset,
+		ListFilter: util.ListFilter{
+			Page:    page,
+			PerPage: perPage,
+		},
 	}
 
-	// Optional filters
-	if backupID := c.Query("backup_id"); backupID != "" {
-		filter.BackupID = &backupID
+	// Parse query filters
+	if queryStr := c.Query("query"); queryStr != "" {
+		filters, err := util.ParseQueryString(queryStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+				Code:    http.StatusBadRequest,
+			})
+			return
+		}
+
+		// Validate field names
+		if err := util.ValidateFilterFields(filters, restoreQueryFields); err != nil {
+			c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+				Code:    http.StatusBadRequest,
+			})
+			return
+		}
+
+		filter.Filters = filters
 	}
 
-	if target := c.Query("target"); target != "" {
-		t := domain.RestoreTarget(target)
-		filter.Target = &t
+	// Parse order
+	if orderStr := c.Query("order"); orderStr != "" {
+		orders, err := util.ParseOrderString(orderStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+				Code:    http.StatusBadRequest,
+			})
+			return
+		}
+
+		// Validate field names
+		if err := util.ValidateOrderFields(orders, restoreOrderFields); err != nil {
+			c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+				Code:    http.StatusBadRequest,
+			})
+			return
+		}
+
+		filter.Order = orders
 	}
 
 	restores, err := h.restoreService.ListRestores(c.Request.Context(), filter)
@@ -110,13 +169,9 @@ func (h *RestoreHandler) ListRestores(c *gin.Context) {
 	count, _ := h.restoreService.CountRestores(c.Request.Context(), filter)
 
 	// Calculate pagination info
-	page := 1
-	if limit > 0 {
-		page = (offset / limit) + 1
-	}
 	totalPages := 0
-	if limit > 0 {
-		totalPages = (count + limit - 1) / limit
+	if perPage > 0 {
+		totalPages = (count + perPage - 1) / perPage
 	}
 
 	response := dto.RestoreListResponse{
@@ -124,7 +179,7 @@ func (h *RestoreHandler) ListRestores(c *gin.Context) {
 		Pagination: dto.PaginationInfo{
 			Total:      count,
 			Page:       page,
-			PerPage:    limit,
+			PerPage:    perPage,
 			TotalPages: totalPages,
 		},
 	}

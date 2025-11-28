@@ -54,6 +54,16 @@ func (s *RestoreService) RestoreToDatabase(ctx context.Context, backupID string)
 		return nil, fmt.Errorf("failed to send restore command: %w", err)
 	}
 
+	// Check for error response from socket service
+	if resp.Code != 202 {
+		// Use Message field if available (Go socket), fall back to Status (Python socket)
+		errMsg := resp.Message
+		if errMsg == "" {
+			errMsg = resp.Status
+		}
+		return nil, NewServiceError(resp.Code, errMsg)
+	}
+
 	// Build process response from db-cmd response
 	// The db-cmd service returns process info that we pass back to the handler
 	// resp.ID contains the command_id (process identifier for status polling)
@@ -90,6 +100,16 @@ func (s *RestoreService) RestoreToFolder(ctx context.Context, backupID string) (
 	resp, err := s.dbClient.SendCommand(ctx, "restore_backup", restoreArgs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send restore command: %w", err)
+	}
+
+	// Check for error response from socket service
+	if resp.Code != 202 {
+		// Use Message field if available (Go socket), fall back to Status (Python socket)
+		errMsg := resp.Message
+		if errMsg == "" {
+			errMsg = resp.Status
+		}
+		return nil, NewServiceError(resp.Code, errMsg)
 	}
 
 	// Build process response from db-cmd response

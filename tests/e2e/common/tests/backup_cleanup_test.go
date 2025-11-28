@@ -1,7 +1,6 @@
 package tests
 
 import (
-	"crypto/tls"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -13,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 	"github.com/martijn/dbcalm/tests/e2e/common/utils"
 )
 
@@ -99,8 +98,8 @@ func createBackupViaAPI(t *testing.T, token, apiURL, backupType, fromBackupID st
 		t.Fatalf("Backup failed: %v", err)
 	}
 
-	backupID, ok := processStatus.Metadata["resource_id"].(string)
-	if !ok || backupID == "" {
+	backupID := processStatus.ResourceID
+	if backupID == "" {
 		t.Fatal("Backup ID not found in process status")
 	}
 
@@ -162,7 +161,7 @@ func getDBCalmDB(t *testing.T) *sql.DB {
 	// Give the system a moment to ensure tables exist
 	time.Sleep(500 * time.Millisecond)
 
-	db, err := sql.Open("sqlite3", DBCalmDBPath)
+	db, err := sql.Open("sqlite", DBCalmDBPath)
 	if err != nil {
 		t.Fatalf("Failed to connect to dbcalm database: %v", err)
 	}

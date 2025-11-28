@@ -52,7 +52,12 @@ func (s *BackupService) CreateFullBackup(ctx context.Context, backupID *string, 
 
 	// Check for 202 Accepted (async operation started)
 	if response.Code != 202 {
-		return nil, fmt.Errorf("backup failed: %s", response.Status)
+		// Use Message field if available (Go socket), fall back to Status (Python socket)
+		errMsg := response.Message
+		if errMsg == "" {
+			errMsg = response.Status
+		}
+		return nil, NewServiceError(response.Code, errMsg)
 	}
 
 	// Return process stub - the actual process was created by socket service
@@ -100,7 +105,12 @@ func (s *BackupService) CreateIncrementalBackup(ctx context.Context, backupID *s
 
 	// Check for 202 Accepted (async operation started)
 	if response.Code != 202 {
-		return nil, fmt.Errorf("incremental backup failed: %s", response.Status)
+		// Use Message field if available (Go socket), fall back to Status (Python socket)
+		errMsg := response.Message
+		if errMsg == "" {
+			errMsg = response.Status
+		}
+		return nil, NewServiceError(response.Code, errMsg)
 	}
 
 	// Return process stub - the actual process was created by socket service

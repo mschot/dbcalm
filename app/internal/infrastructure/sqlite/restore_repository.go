@@ -95,34 +95,12 @@ func (r *restoreRepository) Update(ctx context.Context, restore *domain.Restore)
 }
 
 func (r *restoreRepository) List(ctx context.Context, filter repository.RestoreFilter) ([]*domain.Restore, error) {
-	query := `
-		SELECT id, backup_id, backup_timestamp, target, target_path, start_time, end_time, process_id
-		FROM restore
-		WHERE 1=1
-	`
+	query := `SELECT id, backup_id, backup_timestamp, target, target_path, start_time, end_time, process_id FROM restore WHERE 1=1`
 	args := []interface{}{}
 
-	if filter.BackupID != nil {
-		query += " AND backup_id = ?"
-		args = append(args, *filter.BackupID)
-	}
-
-	if filter.Target != nil {
-		query += " AND target = ?"
-		args = append(args, *filter.Target)
-	}
-
-	query += " ORDER BY start_time DESC"
-
-	if filter.Limit > 0 {
-		query += " LIMIT ?"
-		args = append(args, filter.Limit)
-	}
-
-	if filter.Offset > 0 {
-		query += " OFFSET ?"
-		args = append(args, filter.Offset)
-	}
+	query, args = ApplyFilters(query, args, filter.Filters)
+	query = ApplyOrdering(query, filter.Order, "start_time DESC")
+	query, args = ApplyPagination(query, args, filter.Page, filter.PerPage)
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -150,15 +128,7 @@ func (r *restoreRepository) Count(ctx context.Context, filter repository.Restore
 	query := `SELECT COUNT(*) FROM restore WHERE 1=1`
 	args := []interface{}{}
 
-	if filter.BackupID != nil {
-		query += " AND backup_id = ?"
-		args = append(args, *filter.BackupID)
-	}
-
-	if filter.Target != nil {
-		query += " AND target = ?"
-		args = append(args, *filter.Target)
-	}
+	query, args = ApplyFilters(query, args, filter.Filters)
 
 	var count int
 	err := r.db.QueryRowContext(ctx, query, args...).Scan(&count)

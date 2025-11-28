@@ -61,12 +61,12 @@ func (v *Validator) validateFullBackup(args map[string]interface{}) ValidationRe
 
 	// Check credentials file is valid
 	if !v.credentialsFileValid() {
-		return ValidationResult{Code: StatusServiceUnavailable, Message: "Credentials file is invalid or missing"}
+		return ValidationResult{Code: StatusServiceUnavailable, Message: "credentials file not found or missing [client-dbcalm] section"}
 	}
 
 	// Check server is alive
 	if !v.serverAlive() {
-		return ValidationResult{Code: StatusServiceUnavailable, Message: "Database server is not running"}
+		return ValidationResult{Code: StatusServiceUnavailable, Message: "cannot create backup, MySQL/MariaDB server is not running"}
 	}
 
 	return ValidationResult{Code: StatusOK, Message: ""}
@@ -96,12 +96,12 @@ func (v *Validator) validateIncrementalBackup(args map[string]interface{}) Valid
 
 	// Check credentials file is valid
 	if !v.credentialsFileValid() {
-		return ValidationResult{Code: StatusServiceUnavailable, Message: "Credentials file is invalid or missing"}
+		return ValidationResult{Code: StatusServiceUnavailable, Message: "credentials file not found or missing [client-dbcalm] section"}
 	}
 
 	// Check server is alive
 	if !v.serverAlive() {
-		return ValidationResult{Code: StatusServiceUnavailable, Message: "Database server is not running"}
+		return ValidationResult{Code: StatusServiceUnavailable, Message: "cannot create backup, MySQL/MariaDB server is not running"}
 	}
 
 	return ValidationResult{Code: StatusOK, Message: ""}
@@ -152,11 +152,11 @@ func (v *Validator) validateRestoreBackup(args map[string]interface{}) Validatio
 	// For database restore, check server is stopped and data dir is empty
 	if target == "database" {
 		if v.serverAlive() {
-			return ValidationResult{Code: StatusServiceUnavailable, Message: "Database server must be stopped for database restore"}
+			return ValidationResult{Code: StatusServiceUnavailable, Message: "cannot restore to database, MySQL/MariaDb server is not stopped"}
 		}
 
 		if !v.dataDirEmpty() {
-			return ValidationResult{Code: StatusServiceUnavailable, Message: "Data directory must be empty for database restore"}
+			return ValidationResult{Code: StatusServiceUnavailable, Message: "cannot restore to database, mysql/mariadb data directory is not empty (usually /var/lib/mysql)"}
 		}
 	}
 

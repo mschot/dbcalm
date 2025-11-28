@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/martijn/dbcalm/shared/database"
 )
 
 type Writer struct {
@@ -18,11 +18,7 @@ func NewWriter(dbPath string) *Writer {
 }
 
 func (w *Writer) getDB() (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", w.dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-	return db, nil
+	return database.OpenDB(w.dbPath)
 }
 
 func (w *Writer) CreateProcess(command, commandID string, pid int, status, processType string, args map[string]interface{}, startTime time.Time) (int, error) {
@@ -91,6 +87,8 @@ func (w *Writer) GetProcessByCommandID(commandID string) (*Process, error) {
 		SELECT id, command, command_id, pid, status, output, error, return_code, start_time, end_time, type, args
 		FROM process
 		WHERE command_id = ?
+		ORDER BY id DESC
+		LIMIT 1
 	`, commandID).Scan(&id, &p.Command, &p.CommandID, &p.PID, &p.Status, &output, &errorMsg, &returnCode, &p.StartTime, &endTime, &p.Type, &p.ArgsJSON)
 
 	if err != nil {

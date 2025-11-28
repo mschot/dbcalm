@@ -7,7 +7,7 @@ ARG DB_TYPE=mariadb
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 
-# Install base dependencies and Go
+# Install base dependencies
 RUN apt-get update && apt-get install -y \
     software-properties-common \
     wget \
@@ -51,8 +51,6 @@ RUN mkdir -p /tests/fixtures \
     /tests/logs/dbcalm \
     /tests/test-results && \
     chmod -R 777 /tests/logs /tests/test-results /tests/artifacts
-
-# Note: Scripts, fixtures, and compiled binaries will be mounted as volumes from common/ directory
 
 # Configure MariaDB/MySQL for testing
 RUN mkdir -p /var/run/mysqld && \
