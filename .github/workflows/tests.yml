@@ -1,0 +1,207 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: |
+            app/app/go.sum
+            app/cmd/go-cmd.sum
+            app/cmd/go-db-cmd.sum
+            app/cmd/shared/go.sum
+
+      - name: Run main app tests
+        working-directory: app/app
+        run: make test
+
+      - name: Run cmd service tests
+        working-directory: app/cmd
+        run: make test
+
+  e2e-debian-mariadb:
+    name: E2E - Debian + MariaDB
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build packages
+        run: make package-both-docker
+
+      - name: Prepare E2E artifacts
+        run: |
+          mkdir -p tests/e2e/artifacts tests/e2e/test-results
+          cp build/dist/*.deb tests/e2e/artifacts/
+          cp build/dist/*.rpm tests/e2e/artifacts/
+
+      - name: Run E2E tests
+        run: |
+          cd tests/e2e/common && \
+          DISTRO_DIR=debian DISTRO=debian DB_TYPE=mariadb \
+          docker compose -p dbcalm-e2e-go-deb-mariadb up \
+            --build --force-recreate \
+            --abort-on-container-exit \
+            --exit-code-from test-runner
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-results-debian-mariadb
+          path: app/tests/e2e/test-results/
+
+      - name: Cleanup
+        if: always()
+        run: |
+          cd tests/e2e/common && \
+          docker compose -p dbcalm-e2e-go-deb-mariadb down -v || true
+
+  e2e-debian-mysql:
+    name: E2E - Debian + MySQL
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build packages
+        run: make package-both-docker
+
+      - name: Prepare E2E artifacts
+        run: |
+          mkdir -p tests/e2e/artifacts tests/e2e/test-results
+          cp build/dist/*.deb tests/e2e/artifacts/
+          cp build/dist/*.rpm tests/e2e/artifacts/
+
+      - name: Run E2E tests
+        run: |
+          cd tests/e2e/common && \
+          DISTRO_DIR=debian DISTRO=debian DB_TYPE=mysql \
+          docker compose -p dbcalm-e2e-go-deb-mysql up \
+            --build --force-recreate \
+            --abort-on-container-exit \
+            --exit-code-from test-runner
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-results-debian-mysql
+          path: app/tests/e2e/test-results/
+
+      - name: Cleanup
+        if: always()
+        run: |
+          cd tests/e2e/common && \
+          docker compose -p dbcalm-e2e-go-deb-mysql down -v || true
+
+  e2e-rocky-mariadb:
+    name: E2E - Rocky + MariaDB
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build packages
+        run: make package-both-docker
+
+      - name: Prepare E2E artifacts
+        run: |
+          mkdir -p tests/e2e/artifacts tests/e2e/test-results
+          cp build/dist/*.deb tests/e2e/artifacts/
+          cp build/dist/*.rpm tests/e2e/artifacts/
+
+      - name: Run E2E tests
+        run: |
+          cd tests/e2e/common && \
+          DISTRO_DIR=rocky DISTRO=rocky DB_TYPE=mariadb \
+          docker compose -p dbcalm-e2e-go-rocky-mariadb up \
+            --build --force-recreate \
+            --abort-on-container-exit \
+            --exit-code-from test-runner
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-results-rocky-mariadb
+          path: app/tests/e2e/test-results/
+
+      - name: Cleanup
+        if: always()
+        run: |
+          cd tests/e2e/common && \
+          docker compose -p dbcalm-e2e-go-rocky-mariadb down -v || true
+
+  e2e-rocky-mysql:
+    name: E2E - Rocky + MySQL
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build packages
+        run: make package-both-docker
+
+      - name: Prepare E2E artifacts
+        run: |
+          mkdir -p tests/e2e/artifacts tests/e2e/test-results
+          cp build/dist/*.deb tests/e2e/artifacts/
+          cp build/dist/*.rpm tests/e2e/artifacts/
+
+      - name: Run E2E tests
+        run: |
+          cd tests/e2e/common && \
+          DISTRO_DIR=rocky DISTRO=rocky DB_TYPE=mysql \
+          docker compose -p dbcalm-e2e-go-rocky-mysql up \
+            --build --force-recreate \
+            --abort-on-container-exit \
+            --exit-code-from test-runner
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-results-rocky-mysql
+          path: app/tests/e2e/test-results/
+
+      - name: Cleanup
+        if: always()
+        run: |
+          cd tests/e2e/common && \
+          docker compose -p dbcalm-e2e-go-rocky-mysql down -v || true

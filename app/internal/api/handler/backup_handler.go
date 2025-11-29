@@ -55,20 +55,21 @@ func (h *BackupHandler) CreateBackup(c *gin.Context) {
 	}
 
 	if err != nil {
+		// Return error in AsyncResponse format to match Python behavior
+		// Frontend expects {"status": "error message"} format
 		var svcErr *service.ServiceError
+		var statusCode int
+		var message string
 		if errors.As(err, &svcErr) {
-			c.JSON(svcErr.Code, dto.ErrorResponse{
-				Error:   http.StatusText(svcErr.Code),
-				Message: svcErr.Message,
-				Code:    svcErr.Code,
-			})
+			statusCode = svcErr.Code
+			message = svcErr.Message
 		} else {
-			c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
-				Error:   "Internal Server Error",
-				Message: err.Error(),
-				Code:    http.StatusInternalServerError,
-			})
+			statusCode = http.StatusInternalServerError
+			message = err.Error()
 		}
+		c.JSON(statusCode, dto.AsyncResponse{
+			Status: message,
+		})
 		return
 	}
 

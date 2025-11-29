@@ -34,10 +34,10 @@ func (h *CleanupHandler) Cleanup(c *gin.Context) {
 	}
 
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, dto.ErrorResponse{
-			Error:   "Service Unavailable",
-			Message: err.Error(),
-			Code:    http.StatusServiceUnavailable,
+		// Return error in AsyncResponse format to match Python behavior
+		// Frontend expects {"status": "error message"} format
+		c.JSON(http.StatusServiceUnavailable, dto.AsyncResponse{
+			Status: err.Error(),
 		})
 		return
 	}
